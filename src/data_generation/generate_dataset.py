@@ -44,7 +44,8 @@ from pathlib import Path
 SEED = 42
 N_EMPLOYEES = 800
 N_PROJECTS = 300          # ~165 completed + ~60 active + ~75 pipeline
-N_HISTORICAL_ASSIGNMENTS = 2200   # Average ~7-8 people per historical project
+N_HISTORICAL_ASSIGNMENTS = 6000   # Denser interaction history so the employee×domain
+                                  # rating matrix supports learnable latent factors (MF)
 
 # Output directory (relative to this script: src/data_generation -> ../../data)
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -427,8 +428,10 @@ def generate_historical_assignments(employees_df, projects_df, n_assignments=N_H
     proj_ids = list(proj_reqs.keys())
 
     def pick_employee(domain):
-        """65% of the time pull someone whose primary domain matches the project."""
-        if random.random() < 0.65 and emp_ids_by_domain.get(domain):
+        """~50% of the time pull someone whose primary domain matches the project;
+        the rest are cross-domain so employees accrue ratings in several domains
+        (denser employee×domain matrix => learnable latent factors for MF)."""
+        if random.random() < 0.50 and emp_ids_by_domain.get(domain):
             return random.choice(emp_ids_by_domain[domain])
         return random.choice(all_emp_ids)
 

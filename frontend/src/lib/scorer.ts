@@ -100,24 +100,38 @@ function noveltyBonus(employee: Employee, project: Project): number {
   return 1.0;
 }
 
+// Predicted employee×domain affinity from the Matrix Factorization model
+// (employee_id -> { domain -> predicted rating 1..5 }). Loaded from mf_employee_domain.csv.
+export type MFAffinity = Record<string, Record<string, number>>;
+
 export function computeMatchScore(
   employee: Employee,
   project: Project,
   history: Assignment[],
-  projectDomainMap?: Record<string, string>
+  projectDomainMap?: Record<string, string>,
+  mfAffinity?: MFAffinity
 ): MatchScore {
   const segment = getSegment(employee);
   const weights = WEIGHTS[segment];
 
   const skill = skillMatch(employee, project);
-  const historyS = historyScore(employee, project, history, projectDomainMap);
+
+  // Collaborative-filtering signal. Prefer the *learned* Matrix Factorization
+  // prediction for this (employee, domain); fall back to the domain-scoped
+  // historical average when the MF model has no value (e.g. MF not loaded).
+  const mfPred = mfAffinity?.[employee.employee_id]?.[project.domain];
+  const usedMF = mfPred != null && !Number.isNaN(mfPred);
+  const cfSignal = usedMF
+    ? Math.max(0, Math.min(1, (mfPred - 1) / 4))
+    : historyScore(employee, project, history, projectDomainMap);
+
   const pers = personalityFit(employee);
   const level = levelRoleFit(employee, project);
   const nov = noveltyBonus(employee, project);
 
   const base =
     weights.skill * skill +
-    weights.history * historyS +
+    weights.history * cfSignal +
     weights.personality * pers +
     weights.level * level +
     (weights.novelty || 0) * nov;
@@ -130,7 +144,7 @@ export function computeMatchScore(
     score,
     breakdown: {
       skill: Math.round(skill * 100) / 100,
-      history: Math.round(historyS * 100) / 100,
+      history: Math.round(cfSignal * 100) / 100,
       personality: Math.round(pers * 100) / 100,
       level: Math.round(level * 100) / 100,
       novelty: weights.novelty ? Math.round(nov * 100) / 100 : undefined,

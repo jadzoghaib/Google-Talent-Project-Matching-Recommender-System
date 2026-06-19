@@ -6,8 +6,10 @@ import {
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Employee, Project, MatchScore, TeamAssignment, Assignment } from './lib/types';
-import { loadEmployees, loadProjects, loadHistorical } from './lib/dataLoader';
+import { loadEmployees, loadProjects, loadHistorical, loadMFAffinity, loadMFMetrics } from './lib/dataLoader';
+import type { MFMetrics } from './lib/dataLoader';
 import { computeMatchScore } from './lib/scorer';
+import type { MFAffinity } from './lib/scorer';
 import { optimizeAssignments, validateAssignments } from './lib/optimizer';
 import { evaluateModel, computeCoverage } from './lib/evaluation';
 import type { ModelEvaluation } from './lib/evaluation';
@@ -167,6 +169,8 @@ function App() {
   const [results, setResults] = useState<{ assignments: TeamAssignment[]; totalScore: number; upperBound: number; scores: MatchScore[] } | null>(null);
   const [violations, setViolations] = useState<string[]>([]);
   const [modelEval, setModelEval] = useState<ModelEvaluation | null>(null);
+  const [mfAffinity, setMfAffinity] = useState<MFAffinity>({});
+  const [mfMetrics, setMfMetrics] = useState<MFMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [poolCap, setPoolCap] = useState(70); // how many free engineers the optimizer may draw from
@@ -182,14 +186,18 @@ function App() {
   useEffect(() => {
     async function loadData() {
       try {
-        const [emps, projs, hist] = await Promise.all([loadEmployees(), loadProjects(), loadHistorical()]);
+        const [emps, projs, hist, mf, mfMx] = await Promise.all([
+          loadEmployees(), loadProjects(), loadHistorical(), loadMFAffinity(), loadMFMetrics(),
+        ]);
         setEmployees(emps);
         setAllProjects(projs);
         setHistorical(hist);
+        setMfAffinity(mf);
+        setMfMetrics(mfMx);
         setPipeline(projs.filter(p => p.status === 'pipeline').slice(0, 6).map(p => ({ ...p, isUserAdded: false })));
 
         // Honest evaluation against stored ground truth (runs once on load).
-        try { setModelEval(evaluateModel(emps, projs, hist)); } catch { /* eval is best-effort */ }
+        try { setModelEval(evaluateModel(emps, projs, hist, mf)); } catch { /* eval is best-effort */ }
 
         toast.success(`Loaded ${emps.length} employees · ${projs.length} projects`);
       } catch (err) {
@@ -232,7 +240,7 @@ function App() {
       const allScores: MatchScore[] = [];
       pipeline.forEach(proj => {
         availablePool.forEach(emp => {
-          allScores.push(computeMatchScore(emp, proj, historical, projectDomainMap));
+          allScores.push(computeMatchScore(emp, proj, historical, projectDomainMap, mfAffinity));
         });
       });
 
@@ -415,6 +423,13 @@ function App() {
               <div className="mt-0.5 text-xs text-[#5f6368]">
                 predicted score vs. stored ground truth · n={modelEval.n.toLocaleString()}
               </div>
+              {mfMetrics && (
+                <div className="mt-2 border-t border-[#d2e3fc] pt-2 text-[11px] text-[#5f6368]">
+                  CF = Matrix Factorization · test RMSE{' '}
+                  <span className="font-medium text-[#1967d2]">{mfMetrics.rmse_mf}</span>
+                  <span className="text-[#1e8e3e]"> · beats baseline {mfMetrics.mf_lift_over_domain_mean_pct}%</span>
+                </div>
+              )}
             </div>
             <StatCard
               icon={<TrendingUp className="h-4 w-4" />}

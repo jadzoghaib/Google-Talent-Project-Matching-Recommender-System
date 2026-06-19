@@ -9,7 +9,8 @@ assignments).
 
 1. **Hybrid scoring** for every `engineer × project` pair:
    - **Content-based** — skill match against the project's required skills
-   - **Collaborative** — domain-scoped historical track record
+   - **Collaborative** — a trained **Matrix Factorization** model (latent employee×domain
+     factors, SGD + L2); the domain-scoped historical average is the fallback
    - **Personality** — Big Five signal
    - **Level / role** fit
    - A **smooth seniority signal** routes each person to *exploration*, *balanced*, or
@@ -29,7 +30,8 @@ assignments).
 | Path | Description |
 |------|-------------|
 | `src/data_generation/generate_dataset.py` | Synthetic dataset generator (realistic names, domain-coherent skills, stored ground truth) |
-| `data/` | Generated CSVs: `employees`, `projects`, `historical_assignments` |
+| `src/models/train_matrix_factorization.py` | Trains the MF collaborative model (employee×domain, SGD+L2); exports affinities + RMSE metrics |
+| `data/` | Generated CSVs + `mf_employee_domain.csv`, `mf_metrics.json` |
 | `frontend/` | React 19 + TypeScript + Vite + Tailwind v4 demo UI |
 | `frontend/src/lib/` | `scorer.ts`, `optimizer.ts`, `evaluation.ts`, `dataLoader.ts`, `types.ts` |
 | `docs/ARCHITECTURE.md`, `TEAMMATCH_FULL_SPEC.md` | Design docs |

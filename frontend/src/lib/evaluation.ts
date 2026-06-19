@@ -1,5 +1,6 @@
 import type { Employee, Project, Assignment, TeamAssignment } from './types';
 import { computeMatchScore } from './scorer';
+import type { MFAffinity } from './scorer';
 
 function pearson(xs: number[], ys: number[]): number {
   const n = xs.length;
@@ -35,7 +36,8 @@ export interface ModelEvaluation {
 export function evaluateModel(
   employees: Employee[],
   projects: Project[],
-  historical: Assignment[]
+  historical: Assignment[],
+  mfAffinity?: MFAffinity
 ): ModelEvaluation {
   const empById = new Map(employees.map(e => [e.employee_id, e]));
   const projById = new Map(projects.map(p => [p.project_id, p]));
@@ -50,7 +52,7 @@ export function evaluateModel(
     const emp = empById.get(h.employee_id);
     const proj = projById.get(h.project_id);
     if (!emp || !proj) continue;
-    const ms = computeMatchScore(emp, proj, historical, projectDomainMap);
+    const ms = computeMatchScore(emp, proj, historical, projectDomainMap, mfAffinity);
     predicted.push(ms.score);
     truth.push(h.true_effectiveness);
   }

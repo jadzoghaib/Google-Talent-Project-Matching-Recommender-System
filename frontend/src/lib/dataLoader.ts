@@ -68,6 +68,50 @@ export async function loadProjects(): Promise<Project[]> {
   }));
 }
 
+export interface MFMetrics {
+  model: string;
+  axis: string;
+  latent_factors: number;
+  density_pct: number;
+  n_test: number;
+  rmse_global_mean: number;
+  rmse_domain_mean: number;
+  rmse_mf: number;
+  mf_lift_over_domain_mean_pct: number;
+}
+
+/** Learned employee×domain affinity matrix from the Matrix Factorization model. */
+export async function loadMFAffinity(): Promise<Record<string, Record<string, number>>> {
+  try {
+    const raw = await loadCSV<Record<string, string>>('mf_employee_domain.csv');
+    const map: Record<string, Record<string, number>> = {};
+    for (const row of raw) {
+      const id = row.employee_id;
+      if (!id) continue;
+      const rec: Record<string, number> = {};
+      for (const key of Object.keys(row)) {
+        if (key === 'employee_id') continue;
+        const v = parseFloat(row[key]);
+        if (!Number.isNaN(v)) rec[key] = v;
+      }
+      map[id] = rec;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+export async function loadMFMetrics(): Promise<MFMetrics | null> {
+  try {
+    const res = await fetch(`${DATA_BASE}mf_metrics.json`);
+    if (!res.ok) return null;
+    return (await res.json()) as MFMetrics;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadHistorical(): Promise<Assignment[]> {
   const raw = await loadCSV<any>('historical_assignments.csv');
   return raw.map((r) => ({

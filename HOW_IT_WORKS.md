@@ -16,15 +16,15 @@ everything onto the course units and is honest about what is and isn't a trained
 |---|---|---|
 | 1. Intro to Recommender Engines | ✅ | The whole system: users = engineers, items = projects |
 | 2. Non-personalised recommendations | ⚪️ baseline only | `avg_past_performance` is a non-personalised prior |
-| 3. Collaborative filtering (+ distance metrics) | ✅ (memory-based) | `historyScore` — domain-scoped track record; cohesion uses **cosine similarity** of Big-Five vectors |
+| 3. Collaborative filtering (+ distance metrics) | ✅ | **Matrix-factorization** prediction is the CF signal (`historyScore` is the fallback); cohesion uses **cosine similarity** of Big-Five vectors |
 | 4. Content-based filtering & **hybrid** | ✅ | `skillMatch` (content) + the weighted **hybrid** in `computeMatchScore` |
-| 5. Building real-world systems / **evaluation** | ✅ | `evaluation.ts`: correlation vs. ground truth, top-decile precision, coverage |
-| 6. **Matrix Factorization** (learned latent factors) | ❌ not yet | See [§8 Roadmap](#8-honest-positioning--roadmap) — this is the trained-ML piece to add |
+| 5. Building real-world systems / **evaluation** | ✅ | `evaluation.ts` + `mf_metrics.json`: ground-truth correlation, top-decile precision, MF held-out RMSE, coverage |
+| 6. **Matrix Factorization** (learned latent factors) | ✅ | `src/models/train_matrix_factorization.py` — biased SGD MF on the employee×domain matrix; its prediction is the hybrid's CF signal |
 
-**Short version:** today the recommender is a *hybrid of content-based filtering and
-memory-based collaborative signals*, plus a constrained **optimization** layer (operations
-research, not a recommender concept). The course's headline ML model — **matrix
-factorization** — is the natural next addition (§8).
+**Short version:** the recommender is a *hybrid of content-based filtering and a **trained**
+collaborative-filtering model (matrix factorization)*, plus a constrained **optimization**
+layer (operations research, not a recommender concept). The remaining roadmap item is the
+two-mode run (§8).
 
 ---
 
@@ -51,6 +51,10 @@ pm_review, peer_collaboration_avg, delivery_score, was_successful, true_effectiv
 - The three review columns are **noisy observed ratings** — what the recommender trains on.
 - `true_effectiveness` is the **clean ground truth** — stored *only* so we can evaluate
   honestly (it is never used as a model input).
+
+**Model artifacts (produced by `src/models/train_matrix_factorization.py`):**
+`data/mf_employee_domain.csv` (the learned employee×domain affinity matrix the app loads as
+its CF signal) and `data/mf_metrics.json` (held-out RMSE for the baselines vs. MF).
 
 > **Note on `current_staffed_ids`:** the generator currently writes `"[]"` for every
 > project, even when `current_staffing_count > 0`. That's a known data gap — see §8; it
@@ -103,9 +107,10 @@ produces five 0–1 signals and blends them with **segment-specific weights**.
 1. **Skill match (content-based)** — for each required skill,
    `min(empProficiency / max(reqMinProficiency, 1), 1.3)`, weighted by the skill's weight,
    averaged, capped at 1.
-2. **History (collaborative / track record)** — average of `(pm_review +
-   peer_collaboration_avg + delivery_score)/3` over the employee's **same-domain** past
-   assignments, normalised to 0–1; `0.5` if no relevant history.
+2. **Collaborative filtering — Matrix Factorization (trained ML model)** — the learned MF
+   model predicts this employee's affinity for the project's **domain** (1–5), normalised to
+   0–1. It falls back to the domain-scoped historical average only if the MF prediction is
+   missing. This is the course's Unit-6 model; see §8 for how it's trained.
 3. **Personality fit** — `((O + C + E + A + (6 − N))/5 − 1)/5` (neuroticism inverted).
 4. **Level / role fit** — `1.0` if the employee meets the level *and* role, `0.7` if level
    only, `0.3` if under-qualified.
@@ -179,37 +184,56 @@ assignments, cohesion swaps, contention, achieved/ceiling and elapsed-ms on ever
 
 ---
 
-## 8. Honest positioning & roadmap
+## 8. The Matrix Factorization model (course Unit 6)
 
-**Implemented (course units 3–5):** content-based filtering, a memory-based collaborative
-signal, a hybrid blend, cosine-similarity cohesion, and proper evaluation.
+The collaborative-filtering signal is a **trained** model, not a hand-written average.
+`src/models/train_matrix_factorization.py` learns latent factors exactly as taught:
+predict a rating as `μ + bᵤ + bᵢ + pᵤ·qᵢ` and fit `b`, `P`, `Q` by minimising squared
+error with **SGD + L2 regularisation** (Funk/Koren "SVD" — the Netflix-Prize family).
 
-**Not yet implemented (course unit 6 — the trained ML model): Matrix Factorization.**
-Today the "collaborative" signal is a simple domain-scoped average, not a learned model.
-To add the real thing, as taught (learn latent factors `P`, `Q` from the sparse rating
-matrix by minimising squared error — `TruncatedSVD` / `NMF` / `ALS` in scikit-learn):
-- Build a rating matrix from `historical_assignments` — recommended axis is
-  **employee × domain** (or employee × skill) rather than employee × project, because new
-  pipeline projects are *cold-start items* (MF can't score an item with no ratings — a
-  limitation the deck calls out). Domain/skill factors generalise to brand-new projects.
-- Train offline in Python, export predicted affinities, and feed them in as the
-  collaborative component of the hybrid score.
+**Why employee × domain (not employee × project).** Employee×project is ~0.9% dense and
+every *pipeline* project is a brand-new **cold-start** item MF cannot score — the exact
+limitation in the lecture. Domains are a small recurring item set (11), the matrix is
+dense enough to learn factors, and every project has a domain, so predictions generalise
+to brand-new projects. The rating of `(employee, domain)` is the mean of that employee's
+observed composite reviews on projects in that domain.
 
-**Two-mode recommender (proposed).** Run not only on **pipeline** projects but also on
-**active** projects that are *understaffed* (`current_staffing_count < target`): staff only
-the *gap*, treating already-assigned members (from a populated `current_staffed_ids`) as
-fixed so cohesion is computed against the real existing team. This needs the
-`current_staffed_ids` data gap from §2 fixed first.
+**Guarding against overfitting at this scale.** With sparse rows MF overfits easily, so we
+keep it small (`k = 2` factors), regularise firmly (`λ = 0.1`), and use **early stopping**
+on a validation slice. We also densified the interaction history (6,000 assignments,
+employees spanning several domains) so the matrix is ~36% dense and factors are learnable.
+
+**Held-out result** (`mf_metrics.json`, surfaced on the Model-validity card):
+
+| Model | Test RMSE |
+|---|---|
+| Global mean (non-personalised) | ~0.656 |
+| Domain mean (per-item baseline) | ~0.653 |
+| **Matrix Factorization** | **~0.635** (≈ **2.8%** better than the baseline) |
+
+The lift is modest and honest: on synthetic data driven largely by per-employee competence,
+a bias model captures most of the signal and the latent factors add a little more — which is
+itself a legitimate finding to discuss (MF is data-hungry; cold-start and sparsity matter).
+
+**To retrain:** `py src/models/train_matrix_factorization.py` (after regenerating data),
+then copy `mf_employee_domain.csv` + `mf_metrics.json` into `frontend/public/data/`.
+
+### Remaining roadmap — two-mode recommender
+Run not only on **pipeline** projects but also on **active** projects that are *understaffed*
+(`current_staffing_count < target`): staff only the *gap*, treating already-assigned members
+(from a populated `current_staffed_ids`) as fixed so cohesion is computed against the real
+existing team. This needs the `current_staffed_ids` data gap from §2 fixed first.
 
 ---
 
 ## 9. Running it
 
 ```bash
-# regenerate data (optional)
+# 1. (optional) regenerate data + train the Matrix Factorization model
 py src/data_generation/generate_dataset.py
-cp data/*.csv frontend/public/data/
+py src/models/train_matrix_factorization.py
+cp data/*.csv data/mf_metrics.json frontend/public/data/
 
-# run the app
+# 2. run the app
 cd frontend && npm install && npm run dev   # http://localhost:5180
 ```
