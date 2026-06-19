@@ -75,7 +75,7 @@ function personalityFit(employee: Employee): number {
     employee.personality_agreeableness +
     (6 - employee.personality_neuroticism)
   ) / 5;
-  return (avg - 1) / 5; // 0-1
+  return (avg - 1) / 4; // 0-1
 }
 
 function levelRoleFit(employee: Employee, project: Project): number {
