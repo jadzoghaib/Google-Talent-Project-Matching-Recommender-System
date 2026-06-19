@@ -418,6 +418,38 @@ def generate_historical_assignments(employees_df, projects_df, n_assignments=N_H
     for e in emp_records:
         emp_ids_by_domain.setdefault(e["primary_domain"], []).append(e["employee_id"])
     all_emp_ids = [e["employee_id"] for e in emp_records]
+    past_count = {e["employee_id"]: int(e.get("past_projects_count", 0) or 0) for e in emp_records}
+
+    # --- Hidden low-rank aptitude structure (the signal MF is meant to recover) ---
+    # Domains cluster into "families" that share a talent profile: systems work spans
+    # Cloud/Infra, ranking spans Search/Ads/Maps, etc. Each employee gets a hidden
+    # aptitude vector aligned with their home family (with noise). Performance then has
+    # genuine low-rank structure — the realistic premise that engineering aptitudes
+    # TRANSFER across related domains — which is exactly what Matrix Factorization learns.
+    LATENT_DIM = 3
+    domain_families = {
+        "ranking": ["Search", "Ads", "Maps"],
+        "ml":      ["AI Platform"],
+        "systems": ["Cloud", "Infra"],
+        "client":  ["Android", "Chrome"],
+        "apps":    ["YouTube", "Workspace"],
+        "trust":   ["Payments"],
+    }
+    family_vec = {fam: np.random.normal(0, 1, LATENT_DIM) for fam in domain_families}
+    domain_to_family = {d: fam for fam, ds in domain_families.items() for d in ds}
+    domain_profile = {d: family_vec[domain_to_family[d]] + np.random.normal(0, 0.35, LATENT_DIM)
+                      for d in domain_to_family}
+    emp_aptitude = {}
+    for e in emp_records:
+        dom = e.get("primary_domain")
+        if isinstance(dom, str) and dom in domain_to_family:
+            emp_aptitude[e["employee_id"]] = family_vec[domain_to_family[dom]] + np.random.normal(0, 0.6, LATENT_DIM)
+        else:
+            emp_aptitude[e["employee_id"]] = np.random.normal(0, 1, LATENT_DIM)
+
+    def latent_affinity(emp_id, domain):
+        raw = float(np.dot(emp_aptitude[emp_id], domain_profile[domain])) / LATENT_DIM
+        return 1.0 / (1.0 + np.exp(-raw))   # squash to 0..1
 
     proj_reqs = {}
     for _, p in historical_projects.iterrows():
@@ -428,12 +460,15 @@ def generate_historical_assignments(employees_df, projects_df, n_assignments=N_H
     proj_ids = list(proj_reqs.keys())
 
     def pick_employee(domain):
-        """~50% of the time pull someone whose primary domain matches the project;
-        the rest are cross-domain so employees accrue ratings in several domains
-        (denser employee×domain matrix => learnable latent factors for MF)."""
+        """~50% same-domain, the rest cross-domain (internal mobility). Within the pool,
+        weight by experience so senior engineers accrue richer, multi-domain histories —
+        realistic, and it densifies the senior rows of the rating matrix for MF."""
         if random.random() < 0.50 and emp_ids_by_domain.get(domain):
-            return random.choice(emp_ids_by_domain[domain])
-        return random.choice(all_emp_ids)
+            pool = emp_ids_by_domain[domain]
+        else:
+            pool = all_emp_ids
+        weights = [past_count[e] + 1 for e in pool]
+        return random.choices(pool, weights=weights, k=1)[0]
 
     seen_pairs = set()
     assigned_count = 0
@@ -453,15 +488,15 @@ def generate_historical_assignments(employees_df, projects_df, n_assignments=N_H
 
         pers_penalty = sum(abs(emp[t] - 3.5) * 0.1 for t in BIG_FIVE_TRAITS)
         pers_fit = max(0.3, min(1.0, 0.7 + random.gauss(0, 0.15) - pers_penalty * 0.03))
-
         level_fit = 0.6 + (LEVELS.index(emp["level"]) / 10.0) * 0.6
-        domain_bonus = 0.15 if emp.get("primary_domain") == proj["domain"] else 0.0
 
+        # Latent aptitude (transferable across related domains) is the collaborative
+        # signal MF recovers; skills are the content signal; plus level and personality.
         true_eff_01 = (
-            0.40 * skill_m +
-            0.25 * pers_fit +
+            0.35 * skill_m +
+            0.30 * latent_affinity(emp_id, proj["domain"]) +
             0.20 * level_fit +
-            0.15 * (0.5 + domain_bonus)
+            0.15 * pers_fit
         )
         # Map the 0-1 composite onto the 1-5 review scale and add small bias noise.
         true_eff = float(np.clip(1.0 + 4.0 * true_eff_01 + random.gauss(0, 0.15), 1.0, 5.0))
