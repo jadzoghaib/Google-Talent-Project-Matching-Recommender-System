@@ -236,8 +236,18 @@ function App() {
         });
       });
 
-      const { assignments, totalScore, upperBound } = optimizeAssignments(pipeline, availablePool, allScores, historical);
+      const { assignments, totalScore, upperBound, debug } = optimizeAssignments(pipeline, availablePool, allScores, historical);
       setResults({ assignments, totalScore, upperBound, scores: allScores });
+
+      // Diagnostics — open DevTools console to confirm every stage executed.
+      const eff = upperBound ? Math.round((totalScore / upperBound) * 1000) / 10 : 0;
+      console.log(
+        `[TeamMatch] ${pipeline.length} projects · pool ${debug.available} · scored ${debug.candidatesScored} pairs ` +
+        `(range ${debug.scoreMin}–${debug.scoreMax}, avg ${debug.scoreAvg}) | ` +
+        `greedy ${debug.greedyAssigned} assigns · ${debug.localPasses} local passes · ${debug.localSwaps} cohesion swaps | ` +
+        `top-hire contention: ${debug.contendedTopPicks}/${pipeline.length} projects | ` +
+        `achieved ${totalScore} / ceiling ${upperBound} = ${eff}% | ${debug.elapsedMs}ms`,
+      );
 
       const v = validateAssignments(assignments, employees, pipeline, allScores);
       setViolations(v);

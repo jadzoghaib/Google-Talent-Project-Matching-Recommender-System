@@ -48,12 +48,26 @@ function canFillRole(emp: Employee, req: RoleReq): boolean {
   return rc.includes('software') || rc.includes('engineer') || rc.includes('mid') || rc.includes('senior') || rc.includes('junior') || rc.includes('staff');
 }
 
+export interface OptimizerDebug {
+  available: number;
+  candidatesScored: number;
+  scoreMin: number;
+  scoreMax: number;
+  scoreAvg: number;
+  greedyAssigned: number;
+  localPasses: number;
+  localSwaps: number;
+  contendedTopPicks: number; // how many projects' #1 ideal hire is shared with another project
+  elapsedMs: number;
+}
+
 export function optimizeAssignments(
   pipelineProjects: Project[],
   allEmployees: Employee[],
   scores: MatchScore[],
   _history: unknown[] = []
-): { assignments: TeamAssignment[]; totalScore: number; upperBound: number } {
+): { assignments: TeamAssignment[]; totalScore: number; upperBound: number; debug: OptimizerDebug } {
+  const t0 = performance.now();
   const today = new Date();
   const available = allEmployees.filter(e => !e.current_staffed && new Date(e.available_from) <= today);
 
@@ -120,13 +134,14 @@ export function optimizeAssignments(
   }
   candidates.sort((a, b) => b.score - a.score);
 
+  let greedyAssigned = 0;
   for (const cand of candidates) {
     const { proj, emp } = cand;
     const team = teams.get(proj.project_id)!;
     if (team.length >= proj.required_team_size_target) continue;
     if (!canAssign(emp, proj)) continue;
     const req = openRoleFor(emp, proj);
-    if (req) assign(emp, proj, req);
+    if (req) { assign(emp, proj, req); greedyAssigned++; }
   }
 
   // ---- Phase 2: repair (fill any still-open required roles) -----------------
@@ -169,8 +184,11 @@ export function optimizeAssignments(
     );
   }
 
+  let localSwaps = 0;
+  let localPasses = 0;
   for (let pass = 0; pass < LOCAL_SEARCH_PASSES; pass++) {
     let improved = false;
+    localPasses++;
 
     for (const proj of pipelineProjects) {
       const team = teams.get(proj.project_id)!;
@@ -205,6 +223,7 @@ export function optimizeAssignments(
           memberRole.delete(member.employee_id);
           memberRole.set(bestReplacement.employee_id, mRoleKey);
           improved = true;
+          localSwaps++;
         }
       }
     }
@@ -278,10 +297,45 @@ export function optimizeAssignments(
     return Math.round(bound * 10) / 10;
   }
 
+  // ---- Diagnostics ---------------------------------------------------------
+  // Score distribution proves the scorer produces varied (non-constant) numbers.
+  const scoreVals = scores.map(s => s.score);
+  const scoreMin = scoreVals.length ? Math.min(...scoreVals) : 0;
+  const scoreMax = scoreVals.length ? Math.max(...scoreVals) : 0;
+  const scoreAvg = scoreVals.length ? scoreVals.reduce((a, b) => a + b, 0) / scoreVals.length : 0;
+
+  // Contention check: how many projects' single best ideal hire is also some
+  // other project's best hire. If 0, projects don't compete => efficiency ~100%.
+  const topPickByProj = new Map<string, string>();
+  for (const proj of pipelineProjects) {
+    const best = [...available].sort(
+      (a, b) => scoreFor(b.employee_id, proj.project_id) - scoreFor(a.employee_id, proj.project_id),
+    )[0];
+    if (best) topPickByProj.set(proj.project_id, best.employee_id);
+  }
+  const topPickCounts = new Map<string, number>();
+  for (const empId of topPickByProj.values()) topPickCounts.set(empId, (topPickCounts.get(empId) || 0) + 1);
+  let contendedTopPicks = 0;
+  for (const empId of topPickByProj.values()) if ((topPickCounts.get(empId) || 0) > 1) contendedTopPicks++;
+
+  const debug: OptimizerDebug = {
+    available: available.length,
+    candidatesScored: scores.length,
+    scoreMin: Math.round(scoreMin * 10) / 10,
+    scoreMax: Math.round(scoreMax * 10) / 10,
+    scoreAvg: Math.round(scoreAvg * 100) / 100,
+    greedyAssigned,
+    localPasses,
+    localSwaps,
+    contendedTopPicks,
+    elapsedMs: Math.round((performance.now() - t0) * 100) / 100,
+  };
+
   return {
     assignments,
     totalScore: Math.round(total * 10) / 10,
     upperBound: portfolioUpperBound(),
+    debug,
   };
 }
 
