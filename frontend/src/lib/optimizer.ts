@@ -53,7 +53,7 @@ export function optimizeAssignments(
   allEmployees: Employee[],
   scores: MatchScore[],
   _history: unknown[] = []
-): { assignments: TeamAssignment[]; totalScore: number } {
+): { assignments: TeamAssignment[]; totalScore: number; upperBound: number } {
   const today = new Date();
   const available = allEmployees.filter(e => !e.current_staffed && new Date(e.available_from) <= today);
 
@@ -238,7 +238,51 @@ export function optimizeAssignments(
     total += sum;
   }
 
-  return { assignments, totalScore: Math.round(total * 10) / 10 };
+  // Theoretical ceiling: the best score each project could reach if it got its
+  // *dream team*, relaxing the no-double-staffing constraint (so the same star
+  // engineer can be the ideal hire for several projects at once). No feasible
+  // real assignment can beat this, so the gap between it and totalScore is the
+  // cost of talent contention + the cohesion trade-off the optimizer makes.
+  function portfolioUpperBound(): number {
+    let bound = 0;
+    for (const proj of pipelineProjects) {
+      const target = proj.required_team_size_target;
+      const ranked = [...available].sort(
+        (a, b) => scoreFor(b.employee_id, proj.project_id) - scoreFor(a.employee_id, proj.project_id),
+      );
+      const roles = proj.required_roles || [];
+
+      if (roles.length === 0) {
+        for (let i = 0; i < Math.min(target, ranked.length); i++) {
+          bound += scoreFor(ranked[i].employee_id, proj.project_id);
+        }
+        continue;
+      }
+
+      const slots = new Map<string, number>();
+      for (const r of roles) slots.set(roleKey(r), r.count);
+      let count = 0;
+      for (const emp of ranked) {
+        if (count >= target) break;
+        for (const req of roles) {
+          const k = roleKey(req);
+          if ((slots.get(k) || 0) > 0 && canFillRole(emp, req)) {
+            slots.set(k, (slots.get(k) || 0) - 1);
+            bound += scoreFor(emp.employee_id, proj.project_id);
+            count++;
+            break;
+          }
+        }
+      }
+    }
+    return Math.round(bound * 10) / 10;
+  }
+
+  return {
+    assignments,
+    totalScore: Math.round(total * 10) / 10,
+    upperBound: portfolioUpperBound(),
+  };
 }
 
 // Helper exposed for verification / the UI constraint panel.
