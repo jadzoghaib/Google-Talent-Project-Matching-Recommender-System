@@ -1,0 +1,75 @@
+export interface Employee {
+  employee_id: string;
+  name: string;
+  level: string;
+  role_category: string;
+  years_experience: number;
+  primary_domain: string | null;
+  skills: Array<{ skill: string; proficiency: number }>;
+  tech_tags: string[];
+  personality_openness: number;
+  personality_conscientiousness: number;
+  personality_extraversion: number;
+  personality_agreeableness: number;
+  personality_neuroticism: number;
+  education: { degree: string; field: string; university: string };
+  previous_companies: string[];
+  past_projects_count: number;
+  avg_past_performance: number;
+  primary_location: string;
+  timezone_offset: number;
+  can_work_across_timezones: boolean;
+  current_staffed: boolean;
+  available_from: string;
+  diversity_group: string;
+}
+
+export interface Project {
+  project_id: string;
+  title: string;
+  description: string;
+  domain: string;
+  priority: number;
+  required_team_size_min: number;
+  required_team_size_max: number;
+  required_team_size_target: number;
+  required_roles: Array<{ role: string; min_level: string; count: number }>;
+  required_skills: Array<{ skill: string; min_proficiency: number; weight: number }>;
+  tech_requirements: string[];
+  duration_weeks: number;
+  target_start_date: string;
+  status: string;
+}
+
+export interface Assignment {
+  employee_id: string;
+  project_id: string;
+  pm_review: number;
+  peer_collaboration_avg: number;
+  delivery_score: number;
+  true_effectiveness?: number; // stored ground truth, used for honest evaluation
+}
+
+export interface MatchScore {
+  employee_id: string;
+  project_id: string;
+  score: number;
+  breakdown: {
+    skill: number;
+    history: number;
+    personality: number;
+    level: number;
+    novelty?: number;
+  };
+  segment: 'exploration' | 'exploitation' | 'balanced';
+}
+
+export interface TeamAssignment {
+  project_id: string;
+  employees: string[]; // employee_ids
+  teamScore: number;
+  cohesion: number;
+  individualScores: Record<string, number>;
+}
+
+export type UserSegment = 'exploration' | 'exploitation' | 'balanced';
