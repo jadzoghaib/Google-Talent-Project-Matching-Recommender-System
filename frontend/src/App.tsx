@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Users, Play, Plus, RefreshCw, Award, Sparkles, CheckCircle2,
-  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, UserCheck,
+  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, UserCheck, BarChart2,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,8 +11,10 @@ import type { MFMetrics } from './lib/dataLoader';
 import { computeMatchScore } from './lib/scorer';
 import type { MFAffinity } from './lib/scorer';
 import { optimizeAssignments, validateAssignments } from './lib/optimizer';
+import type { AssignmentSource } from './lib/optimizer';
 import { evaluateModel, computeCoverage } from './lib/evaluation';
 import type { ModelEvaluation } from './lib/evaluation';
+import { AnalysisDrawer } from './AnalysisDrawer';
 
 interface PipelineProject extends Project {
   isUserAdded?: boolean;
@@ -166,7 +168,14 @@ function App() {
   const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [historical, setHistorical] = useState<Assignment[]>([]);
   const [pipeline, setPipeline] = useState<PipelineProject[]>([]);
-  const [results, setResults] = useState<{ assignments: TeamAssignment[]; totalScore: number; upperBound: number; scores: MatchScore[] } | null>(null);
+  const [results, setResults] = useState<{
+    assignments: TeamAssignment[];
+    totalScore: number;
+    upperBound: number;
+    scores: MatchScore[];
+    assignmentSources: Record<string, AssignmentSource>;
+  } | null>(null);
+  const [analysis, setAnalysis] = useState<{ empId: string; projId: string } | null>(null);
   const [violations, setViolations] = useState<string[]>([]);
   const [modelEval, setModelEval] = useState<ModelEvaluation | null>(null);
   const [mfAffinity, setMfAffinity] = useState<MFAffinity>({});
@@ -221,6 +230,16 @@ function App() {
     [results, pipeline],
   );
 
+  // Resolve all data needed by the analysis drawer in one place.
+  const drawerData = useMemo(() => {
+    if (!analysis || !results) return null;
+    const emp = employees.find(e => e.employee_id === analysis.empId);
+    const proj = pipeline.find(p => p.project_id === analysis.projId);
+    const score = results.scores.find(s => s.employee_id === analysis.empId && s.project_id === analysis.projId);
+    if (!emp || !proj || !score) return null;
+    return { emp, proj, score, source: (results.assignmentSources[analysis.empId] ?? 'greedy') as AssignmentSource };
+  }, [analysis, results, employees, pipeline]);
+
   // ---- recommender --------------------------------------------------------
   const runRecommender = async () => {
     if (pipeline.length === 0) { toast.error('Add at least one project to the pipeline'); return; }
@@ -244,8 +263,8 @@ function App() {
         });
       });
 
-      const { assignments, totalScore, upperBound, debug } = optimizeAssignments(pipeline, availablePool, allScores, historical);
-      setResults({ assignments, totalScore, upperBound, scores: allScores });
+      const { assignments, totalScore, upperBound, debug, assignmentSources } = optimizeAssignments(pipeline, availablePool, allScores, historical);
+      setResults({ assignments, totalScore, upperBound, scores: allScores, assignmentSources });
 
       // Diagnostics — open DevTools console to confirm every stage executed.
       const eff = upperBound ? Math.round((totalScore / upperBound) * 1000) / 10 : 0;
@@ -693,6 +712,14 @@ function App() {
                                   </span>
                                 )}
                                 <div className="w-10 text-right font-mono text-base font-medium tabular-nums text-[#1e8e3e]">{indScore}</div>
+                                <button
+                                  onClick={() => setAnalysis({ empId, projId: proj.project_id })}
+                                  className="flex items-center gap-1 rounded-lg border border-[#dadce0] px-2 py-1 text-[10px] font-medium text-[#1a73e8] transition hover:bg-[#e8f0fe]"
+                                  title="Open detailed analysis"
+                                >
+                                  <BarChart2 className="h-3 w-3" />
+                                  Analyze
+                                </button>
                               </div>
                             </div>
                           );
@@ -724,6 +751,23 @@ function App() {
           </div>
         )}
       </div>
+
+      {/* ---- Analysis drawer (slide-in from right) ---- */}
+      <AnimatePresence>
+        {drawerData && (
+          <AnalysisDrawer
+            key={`${drawerData.emp.employee_id}-${drawerData.proj.project_id}`}
+            emp={drawerData.emp}
+            proj={drawerData.proj}
+            score={drawerData.score}
+            allScores={results!.scores}
+            pipeline={pipeline}
+            mfMetrics={mfMetrics}
+            assignmentSource={drawerData.source}
+            onClose={() => setAnalysis(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

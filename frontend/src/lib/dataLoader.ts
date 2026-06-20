@@ -72,7 +72,9 @@ export interface MFMetrics {
   model: string;
   axis: string;
   latent_factors: number;
+  regularization: number;
   density_pct: number;
+  n_train: number;
   n_test: number;
   rmse_global_mean: number;
   rmse_domain_mean: number;

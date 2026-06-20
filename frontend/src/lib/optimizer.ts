@@ -61,12 +61,14 @@ export interface OptimizerDebug {
   elapsedMs: number;
 }
 
+export type AssignmentSource = 'greedy' | 'repair' | 'swap';
+
 export function optimizeAssignments(
   pipelineProjects: Project[],
   allEmployees: Employee[],
   scores: MatchScore[],
   _history: unknown[] = []
-): { assignments: TeamAssignment[]; totalScore: number; upperBound: number; debug: OptimizerDebug } {
+): { assignments: TeamAssignment[]; totalScore: number; upperBound: number; debug: OptimizerDebug; assignmentSources: Record<string, AssignmentSource> } {
   const t0 = performance.now();
   const today = new Date();
   const available = allEmployees.filter(e => !e.current_staffed && new Date(e.available_from) <= today);
@@ -80,6 +82,7 @@ export function optimizeAssignments(
   const remainingSlots = new Map<string, Map<string, number>>(); // projId -> roleKey -> count
   const memberRole = new Map<string, string>();            // empId -> roleKey it fills
   const assignedEmployees = new Set<string>();
+  const assignmentSources = new Map<string, AssignmentSource>(); // empId -> which phase assigned them
 
   const roleKey = (req: RoleReq) => `${req.role}:${req.min_level}`;
   const parseRoleKey = (key: string): RoleReq => {
@@ -114,11 +117,12 @@ export function optimizeAssignments(
     return true;
   }
 
-  function assign(emp: Employee, proj: Project, req: RoleReq) {
+  function assign(emp: Employee, proj: Project, req: RoleReq, source: AssignmentSource) {
     const team = teams.get(proj.project_id)!;
     team.push(emp);
     assignedEmployees.add(emp.employee_id);
     memberRole.set(emp.employee_id, roleKey(req));
+    assignmentSources.set(emp.employee_id, source);
     const slots = remainingSlots.get(proj.project_id)!;
     slots.set(roleKey(req), (slots.get(roleKey(req)) || 0) - 1);
   }
@@ -141,7 +145,7 @@ export function optimizeAssignments(
     if (team.length >= proj.required_team_size_target) continue;
     if (!canAssign(emp, proj)) continue;
     const req = openRoleFor(emp, proj);
-    if (req) { assign(emp, proj, req); greedyAssigned++; }
+    if (req) { assign(emp, proj, req, 'greedy'); greedyAssigned++; }
   }
 
   // ---- Phase 2: repair (fill any still-open required roles) -----------------
@@ -156,7 +160,7 @@ export function optimizeAssignments(
         const candidate = available
           .filter(e => !assignedEmployees.has(e.employee_id) && canFillRole(e, req))
           .sort((a, b) => scoreFor(b.employee_id, proj.project_id) - scoreFor(a.employee_id, proj.project_id))[0];
-        if (candidate) assign(candidate, proj, req);
+        if (candidate) assign(candidate, proj, req, 'repair');
         else break;
       }
     }
@@ -222,6 +226,8 @@ export function optimizeAssignments(
           assignedEmployees.add(bestReplacement.employee_id);
           memberRole.delete(member.employee_id);
           memberRole.set(bestReplacement.employee_id, mRoleKey);
+          assignmentSources.delete(member.employee_id);
+          assignmentSources.set(bestReplacement.employee_id, 'swap');
           improved = true;
           localSwaps++;
         }
@@ -336,6 +342,7 @@ export function optimizeAssignments(
     totalScore: Math.round(total * 10) / 10,
     upperBound: portfolioUpperBound(),
     debug,
+    assignmentSources: Object.fromEntries(assignmentSources) as Record<string, AssignmentSource>,
   };
 }
 

@@ -1,6 +1,6 @@
 import type { Employee, Project, Assignment, MatchScore, UserSegment } from './types';
 
-const WEIGHTS = {
+export const WEIGHTS = {
   exploration: { skill: 0.40, history: 0.10, personality: 0.25, level: 0.10, novelty: 0.15 },
   exploitation: { skill: 0.35, history: 0.40, personality: 0.15, level: 0.10, novelty: 0.00 },
   balanced: { skill: 0.35, history: 0.35, personality: 0.20, level: 0.10, novelty: 0.00 },
@@ -150,5 +150,7 @@ export function computeMatchScore(
       novelty: weights.novelty ? Math.round(nov * 100) / 100 : undefined,
     },
     segment,
+    usedMF,
+    mfRawPred: usedMF ? Math.round((mfPred as number) * 100) / 100 : undefined,
   };
 }

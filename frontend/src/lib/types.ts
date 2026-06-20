@@ -62,6 +62,8 @@ export interface MatchScore {
     novelty?: number;
   };
   segment: 'exploration' | 'exploitation' | 'balanced';
+  usedMF: boolean;       // true when MF model was used; false means historical-avg fallback
+  mfRawPred?: number;    // raw MF prediction on 1–5 scale (only set when usedMF is true)
 }
 
 export interface TeamAssignment {
