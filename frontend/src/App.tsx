@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Users, Play, Plus, RefreshCw, Award, Sparkles, CheckCircle2,
-  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, UserCheck, BarChart2,
+  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, UserCheck, BarChart2, UserPlus,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,6 +15,8 @@ import type { AssignmentSource } from './lib/optimizer';
 import { evaluateModel, computeCoverage } from './lib/evaluation';
 import type { ModelEvaluation } from './lib/evaluation';
 import { AnalysisDrawer } from './AnalysisDrawer';
+import { OnboardingPage } from './OnboardingPage';
+import type { NewHireResult } from './OnboardingPage';
 
 interface PipelineProject extends Project {
   isUserAdded?: boolean;
@@ -183,6 +185,9 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [poolCap, setPoolCap] = useState(70); // how many free engineers the optimizer may draw from
+  const [newEmployees, setNewEmployees] = useState<Employee[]>([]);
+  const [onboardingAffinities, setOnboardingAffinities] = useState<Record<string, Record<string, number>>>({});
+  const [activeTab, setActiveTab] = useState<'recommender' | 'onboard'>('recommender');
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -220,8 +225,8 @@ function App() {
   }, []);
 
   const availableCount = useMemo(
-    () => employees.filter(e => !e.current_staffed && new Date(e.available_from) <= new Date()).length,
-    [employees],
+    () => employees.filter(e => !e.current_staffed && new Date(e.available_from) <= new Date()).length + newEmployees.length,
+    [employees, newEmployees],
   );
   const effectivePool = availableCount ? Math.min(poolCap, availableCount) : poolCap;
 
@@ -233,12 +238,16 @@ function App() {
   // Resolve all data needed by the analysis drawer in one place.
   const drawerData = useMemo(() => {
     if (!analysis || !results) return null;
-    const emp = employees.find(e => e.employee_id === analysis.empId);
+    const emp = employees.find(e => e.employee_id === analysis.empId) ?? newEmployees.find(e => e.employee_id === analysis.empId);
     const proj = pipeline.find(p => p.project_id === analysis.projId);
     const score = results.scores.find(s => s.employee_id === analysis.empId && s.project_id === analysis.projId);
     if (!emp || !proj || !score) return null;
-    return { emp, proj, score, source: (results.assignmentSources[analysis.empId] ?? 'greedy') as AssignmentSource };
-  }, [analysis, results, employees, pipeline]);
+    return {
+      emp, proj, score,
+      source: (results.assignmentSources[analysis.empId] ?? 'greedy') as AssignmentSource,
+      isOnboardingEmployee: newEmployees.some(e => e.employee_id === analysis.empId),
+    };
+  }, [analysis, results, employees, newEmployees, pipeline]);
 
   // ---- recommender --------------------------------------------------------
   const runRecommender = async () => {
@@ -249,17 +258,22 @@ function App() {
     try {
       // Cap the available pool — fewer free engineers => more contention for the
       // best people => the optimizer is forced further below the ceiling.
-      const availablePool = employees
+      const regularPool = employees
         .filter(e => !e.current_staffed && new Date(e.available_from) <= new Date())
         .slice(0, poolCap);
+      // New hires always enter the pool; their domain affinities replace MF training data.
+      const availablePool = [...regularPool, ...newEmployees];
 
       const projectDomainMap: Record<string, string> = {};
       [...allProjects, ...pipeline].forEach(p => { if (p.project_id) projectDomainMap[p.project_id] = p.domain; });
 
+      // Merge onboarding assessment affinities into the MF lookup.
+      const mergedMfAffinity: MFAffinity = { ...mfAffinity, ...onboardingAffinities };
+
       const allScores: MatchScore[] = [];
       pipeline.forEach(proj => {
         availablePool.forEach(emp => {
-          allScores.push(computeMatchScore(emp, proj, historical, projectDomainMap, mfAffinity));
+          allScores.push(computeMatchScore(emp, proj, historical, projectDomainMap, mergedMfAffinity));
         });
       });
 
@@ -347,7 +361,15 @@ function App() {
     toast('Pipeline reset to sample projects');
   };
 
-  const getEmployee = (id: string) => employees.find(e => e.employee_id === id);
+  const getEmployee = (id: string) => employees.find(e => e.employee_id === id) ?? newEmployees.find(e => e.employee_id === id);
+
+  function handleOnboardingSubmit({ employee, domainAffinities }: NewHireResult) {
+    setNewEmployees(prev => [...prev, employee]);
+    setOnboardingAffinities(prev => ({ ...prev, [employee.employee_id]: domainAffinities }));
+    setActiveTab('recommender');
+    setResults(null);
+    toast.success(`${employee.name} added to talent pool — run the recommender to assign them.`);
+  }
 
   // Material text-field classes (reused across the add-project form)
   const field = 'mt-1 w-full rounded-lg border border-[#dadce0] bg-white px-3 py-2.5 text-sm text-[#202124] outline-none transition focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]';
@@ -389,7 +411,22 @@ function App() {
               <UserCheck className="h-3.5 w-3.5 text-[#34A853]" />
               <span className="font-medium tabular-nums">{availableCount}</span>
               <span className="text-[#5f6368]">available</span>
+              {newEmployees.length > 0 && (
+                <span className="ml-1 rounded-full bg-[#34A853] px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                  +{newEmployees.length} new
+                </span>
+              )}
             </div>
+            <button
+              onClick={() => setActiveTab(activeTab === 'onboard' ? 'recommender' : 'onboard')}
+              className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition ${
+                activeTab === 'onboard'
+                  ? 'border-[#1a73e8] bg-[#e8f0fe] text-[#1a73e8]'
+                  : 'border-[#dadce0] text-[#5f6368] hover:bg-[#f1f3f4]'
+              }`}
+            >
+              <UserPlus className="h-3.5 w-3.5" /> Onboard
+            </button>
             <button
               onClick={resetPipeline}
               className="flex items-center gap-2 rounded-full border border-[#dadce0] px-4 py-1.5 text-sm font-medium text-[#5f6368] transition hover:bg-[#f1f3f4]"
@@ -401,6 +438,18 @@ function App() {
       </header>
 
       <div className="mx-auto max-w-7xl space-y-8 px-6 py-8">
+
+        {/* ---- Onboarding tab ---- */}
+        {activeTab === 'onboard' && (
+          <OnboardingPage
+            onSubmit={handleOnboardingSubmit}
+            onCancel={() => setActiveTab('recommender')}
+          />
+        )}
+
+        {/* ---- Pipeline recommender tab ---- */}
+        {activeTab === 'recommender' && <>
+
         {/* ---- Title + actions ---- */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -750,6 +799,7 @@ function App() {
             </p>
           </div>
         )}
+        </> /* end recommender tab */}
       </div>
 
       {/* ---- Analysis drawer (slide-in from right) ---- */}
@@ -764,6 +814,7 @@ function App() {
             pipeline={pipeline}
             mfMetrics={mfMetrics}
             assignmentSource={drawerData.source}
+            isOnboardingEmployee={drawerData.isOnboardingEmployee}
             onClose={() => setAnalysis(null)}
           />
         )}

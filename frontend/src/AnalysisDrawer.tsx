@@ -90,10 +90,11 @@ interface Props {
   pipeline: Project[];
   mfMetrics: MFMetrics | null;
   assignmentSource: AssignmentSource;
+  isOnboardingEmployee?: boolean;
   onClose: () => void;
 }
 
-export function AnalysisDrawer({ emp, proj, score, allScores, pipeline, mfMetrics, assignmentSource, onClose }: Props) {
+export function AnalysisDrawer({ emp, proj, score, allScores, pipeline, mfMetrics, assignmentSource, isOnboardingEmployee, onClose }: Props) {
   // Close on Escape key
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -199,6 +200,11 @@ export function AnalysisDrawer({ emp, proj, score, allScores, pipeline, mfMetric
             <span className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${score.usedMF ? 'bg-[#e6f4ea] text-[#137333]' : 'bg-[#f1f3f4] text-[#5f6368]'}`}>
               {score.usedMF ? '✦ Matrix Factorization' : 'CF: historical avg'}
             </span>
+            {isOnboardingEmployee && (
+              <span className="flex items-center gap-1.5 rounded-full bg-[#f3e8ff] px-2.5 py-1 text-[11px] font-medium text-[#7b1fa2]">
+                ✦ Onboarding Assessment
+              </span>
+            )}
             {isCrossDomain && (
               <span className="flex items-center gap-1.5 rounded-full bg-[#fce8e6] px-2.5 py-1 text-[11px] font-medium text-[#c5221f]">
                 Cross-domain match
@@ -353,11 +359,16 @@ export function AnalysisDrawer({ emp, proj, score, allScores, pipeline, mfMetric
                 {/* Per-employee MF detail */}
                 {score.usedMF && score.mfRawPred !== undefined ? (
                   <div className="mt-3 rounded-lg border border-[#ceead6] bg-[#e6f4ea] px-3 py-2 text-[11px]">
-                    MF predicted <span className="font-semibold text-[#202124]">{emp.name.split(' ')[0]}</span>'s
-                    {' '}affinity for the <span className="font-semibold">{proj.domain}</span> domain:{' '}
+                    {isOnboardingEmployee
+                      ? <>Affinity score for the <span className="font-semibold">{proj.domain}</span> domain comes from the <span className="font-semibold">onboarding aptitude assessment</span> (not MF training data): </>
+                      : <>MF predicted <span className="font-semibold text-[#202124]">{emp.name.split(' ')[0]}</span>'s affinity for the <span className="font-semibold">{proj.domain}</span> domain: </>
+                    }
                     <span className="font-mono font-bold text-[#137333]">{score.mfRawPred.toFixed(2)} / 5</span>
                     {' '}→ normalised CF signal:{' '}
                     <span className="font-mono font-bold text-[#1a73e8]">{score.breakdown.history.toFixed(2)}</span>
+                    {isOnboardingEmployee && (
+                      <div className="mt-1 text-[10px] text-[#137333]">Cold-start solved — full recommender coverage from day one.</div>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-3 rounded-lg border border-[#feefc3] bg-[#fef7e0] px-3 py-2 text-[11px] text-[#b06000]">
