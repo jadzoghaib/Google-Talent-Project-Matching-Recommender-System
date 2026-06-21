@@ -18,6 +18,8 @@ import { AnalysisDrawer } from './AnalysisDrawer';
 import { OnboardingPage } from './OnboardingPage';
 import type { NewHireResult } from './OnboardingPage';
 import { SKILLS_CATALOG, PROJECT_DOMAINS, LEVELS, PROJECT_ROLES, DOMAIN_SKILLS } from './lib/catalog';
+import { ProjectsTab } from './ProjectsTab';
+import { PeopleTab } from './PeopleTab';
 
 interface PipelineProject extends Project {
   isUserAdded?: boolean;
@@ -305,7 +307,7 @@ function App() {
   const [poolCap, setPoolCap] = useState(70); // how many free engineers the optimizer may draw from
   const [newEmployees, setNewEmployees] = useState<Employee[]>([]);
   const [onboardingAffinities, setOnboardingAffinities] = useState<Record<string, Record<string, number>>>({});
-  const [activeTab, setActiveTab] = useState<'recommender' | 'onboard'>('recommender');
+  const [activeTab, setActiveTab] = useState<'recommender' | 'projects' | 'people' | 'onboard'>('recommender');
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -371,6 +373,24 @@ function App() {
       isOnboardingEmployee: newEmployees.some(e => e.employee_id === analysis.empId),
     };
   }, [analysis, results, employees, newEmployees, pipeline]);
+
+  // ---- shared derived data for the Projects / People tabs -----------------
+  const pipelineIds = useMemo(() => new Set(pipeline.map(p => p.project_id)), [pipeline]);
+  const allPeople = useMemo(() => [...employees, ...newEmployees], [employees, newEmployees]);
+  const newHireIds = useMemo(() => new Set(newEmployees.map(e => e.employee_id)), [newEmployees]);
+  const mergedAffinity = useMemo(
+    () => ({ ...mfAffinity, ...onboardingAffinities }),
+    [mfAffinity, onboardingAffinities],
+  );
+
+  // Stage an existing catalogue project into the working recommender pipeline.
+  const addExistingToPipeline = (p: Project) => {
+    if (pipelineIds.has(p.project_id)) { toast('Already in the pipeline'); return; }
+    setPipeline(prev => [...prev, { ...p, isUserAdded: false }]);
+    setResults(null);
+    setActiveTab('recommender');
+    toast.success(`Added "${p.title}" to the pipeline`);
+  };
 
   // ---- recommender --------------------------------------------------------
   const runRecommender = async () => {
@@ -526,28 +546,44 @@ function App() {
               <p className="text-[11px] text-[#5f6368]">Talent → Project Recommender</p>
             </div>
           </div>
+          {/* Tab navigation */}
+          <nav className="flex items-center gap-1 rounded-full bg-[#f1f3f4] p-1">
+            {([
+              { key: 'recommender', label: 'Recommender', icon: Sparkles },
+              { key: 'projects', label: 'Projects', icon: Layers },
+              { key: 'people', label: 'People', icon: Users },
+              { key: 'onboard', label: 'Onboard', icon: UserPlus },
+            ] as const).map(t => {
+              const Icon = t.icon;
+              const on = activeTab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setActiveTab(t.key)}
+                  className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium transition ${
+                    on ? 'bg-white text-[#1a73e8] shadow-[0_1px_2px_rgba(60,64,67,0.2)]' : 'text-[#5f6368] hover:text-[#202124]'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" /> <span className="hidden sm:inline">{t.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
           <div className="flex items-center gap-2 text-sm">
-            <div className="hidden items-center gap-1.5 rounded-full bg-[#f1f3f4] px-3 py-1.5 sm:flex">
+            <div className="hidden items-center gap-1.5 rounded-full bg-[#f1f3f4] px-3 py-1.5 lg:flex">
               <Users className="h-3.5 w-3.5 text-[#5f6368]" />
-              <span className="font-medium tabular-nums">{employees.length}</span>
+              <span className="font-medium tabular-nums">{allPeople.length}</span>
               <span className="text-[#5f6368]">staff</span>
             </div>
-            <button
-              onClick={() => setActiveTab(activeTab === 'onboard' ? 'recommender' : 'onboard')}
-              className={`flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition ${
-                activeTab === 'onboard'
-                  ? 'border-[#1a73e8] bg-[#e8f0fe] text-[#1a73e8]'
-                  : 'border-[#dadce0] text-[#5f6368] hover:bg-[#f1f3f4]'
-              }`}
-            >
-              <UserPlus className="h-3.5 w-3.5" /> Onboard
-            </button>
-            <button
-              onClick={resetPipeline}
-              className="flex items-center gap-2 rounded-full border border-[#dadce0] px-4 py-1.5 text-sm font-medium text-[#5f6368] transition hover:bg-[#f1f3f4]"
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> Reset
-            </button>
+            {activeTab === 'recommender' && (
+              <button
+                onClick={resetPipeline}
+                className="flex items-center gap-2 rounded-full border border-[#dadce0] px-4 py-1.5 text-sm font-medium text-[#5f6368] transition hover:bg-[#f1f3f4]"
+              >
+                <RefreshCw className="h-3.5 w-3.5" /> Reset
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -559,6 +595,25 @@ function App() {
           <OnboardingPage
             onSubmit={handleOnboardingSubmit}
             onCancel={() => setActiveTab('recommender')}
+          />
+        )}
+
+        {/* ---- Projects tab ---- */}
+        {activeTab === 'projects' && (
+          <ProjectsTab
+            projects={allProjects}
+            pipelineIds={pipelineIds}
+            onAddToPipeline={addExistingToPipeline}
+          />
+        )}
+
+        {/* ---- People tab ---- */}
+        {activeTab === 'people' && (
+          <PeopleTab
+            employees={allPeople}
+            affinity={mergedAffinity}
+            historical={historical}
+            newHireIds={newHireIds}
           />
         )}
 
