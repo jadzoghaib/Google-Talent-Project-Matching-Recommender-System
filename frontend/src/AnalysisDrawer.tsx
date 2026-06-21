@@ -5,15 +5,7 @@ import type { Employee, Project, MatchScore } from './lib/types';
 import { WEIGHTS } from './lib/scorer';
 import type { AssignmentSource } from './lib/optimizer';
 import type { MFMetrics } from './lib/dataLoader';
-
-const G = { blue: '#4285F4', red: '#EA4335', yellow: '#FBBC04', green: '#34A853', blue600: '#1a73e8' };
-const AVATAR_COLORS = ['#4285F4', '#EA4335', '#34A853', '#1a73e8', '#a142f4', '#f9ab00', '#12b5cb'];
-
-const DOMAIN_COLORS: Record<string, string> = {
-  Search: '#4285F4', Ads: '#FBBC04', YouTube: '#EA4335', Android: '#34A853',
-  Cloud: '#1a73e8', 'AI Platform': '#a142f4', Payments: '#0F9D58',
-  Infra: '#5f6368', Maps: '#F4B400', Workspace: '#4A90D9', Chrome: '#d93025',
-};
+import { G, DOMAIN_COLORS, avatarColor } from './lib/uikit';
 
 const SEGMENT_META = {
   exploration: { label: 'Exploration', desc: 'Juniors — rewards novelty & serendipity', color: '#1967d2', bg: '#e8f0fe' },
@@ -26,12 +18,6 @@ const SOURCE_META: Record<AssignmentSource, { label: string; cls: string }> = {
   repair: { label: 'Repair (phase 2)', cls: 'bg-[#fef7e0] text-[#b06000]' },
   swap:   { label: 'Local-search swap (phase 3)', cls: 'bg-[#e8f0fe] text-[#1967d2]' },
 };
-
-function avatarColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length];
-}
 
 // ── sub-components ─────────────────────────────────────────────────────────────
 
@@ -141,7 +127,7 @@ export function AnalysisDrawer({ emp, proj, score, allScores, pipeline, mfMetric
         animate={{ x: 0 }}
         exit={{ x: '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 280 }}
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[500px] flex-col overflow-y-auto bg-white shadow-2xl"
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-[520px] flex-col overflow-y-auto bg-white shadow-2xl"
         role="dialog"
         aria-label={`Analysis for ${emp.name}`}
       >

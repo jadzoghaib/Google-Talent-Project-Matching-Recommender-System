@@ -1,4 +1,5 @@
 import type { Employee, Project, Assignment, MatchScore, UserSegment } from './types';
+import { levelMeets, roleMatches } from './roles';
 
 export const WEIGHTS = {
   exploration: { skill: 0.40, history: 0.10, personality: 0.25, level: 0.10, novelty: 0.15 },
@@ -81,16 +82,12 @@ function personalityFit(employee: Employee): number {
 function levelRoleFit(employee: Employee, project: Project): number {
   if (!project.required_roles?.length) return 0.7;
 
-  const empLevelIdx = ['L3','L4','L5','L6','L7','L8'].indexOf(employee.level);
   let bestFit = 0;
-
   for (const req of project.required_roles) {
-    const reqIdx = ['L3','L4','L5','L6','L7','L8'].indexOf(req.min_level);
-    if (empLevelIdx >= reqIdx && employee.role_category.toLowerCase().includes(req.role.toLowerCase().split(' ')[0])) {
-      bestFit = Math.max(bestFit, 1.0);
-    } else if (empLevelIdx >= reqIdx) {
-      bestFit = Math.max(bestFit, 0.7);
-    }
+    if (!levelMeets(employee.level, req.min_level)) continue;
+    // Full credit when the role category also matches the required role (e.g. a
+    // Senior filling a Tech Lead slot); partial when only the level qualifies.
+    bestFit = Math.max(bestFit, roleMatches(employee.role_category, req.role) ? 1.0 : 0.7);
   }
   return bestFit || 0.3;
 }

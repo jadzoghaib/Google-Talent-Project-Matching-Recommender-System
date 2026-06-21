@@ -1,12 +1,20 @@
 import type { Employee, Project, MatchScore, TeamAssignment } from './types';
-
-const LEVEL_ORDER = ['L3', 'L4', 'L5', 'L6', 'L7', 'L8'];
+import { levelMeets, roleMatches } from './roles';
 
 // How much team chemistry counts in the objective, per member. Individual match
 // scores live on a 1-10 scale; cohesion is a 0-1 cosine similarity. This weight
 // makes cohesion a real tie-breaker that the local search optimizes for, rather
 // than a number we only display after the fact.
 const COHESION_WEIGHT = 1.2;
+
+// Priority tilts contention: when a star engineer fits several projects, the
+// higher-priority one should win. Priority 1 (highest) .. 5 (lowest) maps to a
+// 1.32 .. 1.0 multiplier on that project's scores — enough to break ties toward
+// urgent work without letting a P1 grab a badly-fitting hire over a P5's great one.
+function priorityWeight(priority: number): number {
+  const p = Math.max(1, Math.min(5, priority || 3));
+  return 1 + (5 - p) * 0.08;
+}
 const QUALITY_FLOOR = 4.0;
 const LOCAL_SEARCH_PASSES = 8;
 // Local search only needs to consider strong candidates: replacing a member with
@@ -41,11 +49,7 @@ function cohesionOf(team: Employee[]): number {
 }
 
 function canFillRole(emp: Employee, req: RoleReq): boolean {
-  if (LEVEL_ORDER.indexOf(emp.level) < LEVEL_ORDER.indexOf(req.min_level)) return false;
-  const rc = emp.role_category.toLowerCase();
-  const role = req.role.toLowerCase();
-  if (role.includes('lead')) return rc.includes('lead') || rc.includes('staff') || rc.includes('principal') || rc.includes('senior');
-  return rc.includes('software') || rc.includes('engineer') || rc.includes('mid') || rc.includes('senior') || rc.includes('junior') || rc.includes('staff');
+  return levelMeets(emp.level, req.min_level) && roleMatches(emp.role_category, req.role);
 }
 
 export interface OptimizerDebug {
@@ -76,6 +80,7 @@ export function optimizeAssignments(
   const scoreMap = new Map<string, number>(); // key: empId|projId
   scores.forEach(s => scoreMap.set(`${s.employee_id}|${s.project_id}`, s.score));
   const scoreFor = (empId: string, projId: string) => scoreMap.get(`${empId}|${projId}`) ?? 3;
+  const prw = (proj: Project) => priorityWeight(proj.priority); // contention tilt
 
   // ---- Per-project mutable state -------------------------------------------
   const teams = new Map<string, Employee[]>();             // projId -> team
@@ -133,7 +138,7 @@ export function optimizeAssignments(
   const candidates: Array<{ proj: Project; emp: Employee; score: number }> = [];
   for (const proj of pipelineProjects) {
     for (const emp of available) {
-      candidates.push({ proj, emp, score: scoreFor(emp.employee_id, proj.project_id) });
+      candidates.push({ proj, emp, score: scoreFor(emp.employee_id, proj.project_id) * prw(proj) });
     }
   }
   candidates.sort((a, b) => b.score - a.score);
@@ -260,7 +265,7 @@ export function optimizeAssignments(
       cohesion: Math.round(cohesion * 100) / 100,
       individualScores,
     });
-    total += sum;
+    total += prw(proj) * sum;
   }
 
   // Theoretical ceiling: the best score each project could reach if it got its
@@ -279,7 +284,7 @@ export function optimizeAssignments(
 
       if (roles.length === 0) {
         for (let i = 0; i < Math.min(target, ranked.length); i++) {
-          bound += scoreFor(ranked[i].employee_id, proj.project_id);
+          bound += prw(proj) * scoreFor(ranked[i].employee_id, proj.project_id);
         }
         continue;
       }
@@ -293,7 +298,7 @@ export function optimizeAssignments(
           const k = roleKey(req);
           if ((slots.get(k) || 0) > 0 && canFillRole(emp, req)) {
             slots.set(k, (slots.get(k) || 0) - 1);
-            bound += scoreFor(emp.employee_id, proj.project_id);
+            bound += prw(proj) * scoreFor(emp.employee_id, proj.project_id);
             count++;
             break;
           }

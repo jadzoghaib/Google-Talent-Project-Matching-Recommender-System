@@ -22,6 +22,7 @@ import { ProjectsTab } from './ProjectsTab';
 import { PeopleTab } from './PeopleTab';
 import { ReviewDrawer } from './ReviewDrawer';
 import type { ReviewRow } from './ReviewDrawer';
+import { G, CARD, avatarColor, levelTone, StatCard } from './lib/uikit';
 
 interface PipelineProject extends Project {
   isUserAdded?: boolean;
@@ -36,24 +37,11 @@ const DEFAULT_ROLES: RoleReq[] = [
   { role: 'Software Engineer', min_level: 'L4', count: 4 },
 ];
 
-// Google brand palette
-const G = { blue: '#4285F4', red: '#EA4335', yellow: '#FBBC04', green: '#34A853', blue600: '#1a73e8' };
-
-// Material card surface
-const CARD = 'rounded-2xl border border-[#dadce0] bg-white shadow-[0_1px_3px_rgba(60,64,67,0.10)]';
-
 const SEGMENT_META: Record<string, { label: string; cls: string; dot: string }> = {
   exploration: { label: 'Explore', cls: 'bg-[#e8f0fe] text-[#1967d2]', dot: 'bg-[#4285F4]' },
   exploitation: { label: 'Exploit', cls: 'bg-[#fef7e0] text-[#b06000]', dot: 'bg-[#f9ab00]' },
   balanced: { label: 'Balanced', cls: 'bg-[#e6f4ea] text-[#137333]', dot: 'bg-[#34A853]' },
 };
-
-const AVATAR_COLORS = ['#4285F4', '#EA4335', '#34A853', '#1a73e8', '#a142f4', '#f9ab00', '#12b5cb'];
-function avatarColor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return AVATAR_COLORS[h % AVATAR_COLORS.length];
-}
 
 // ---- The four-colour Google "G" mark (also used as the favicon) -------------
 function GoogleG({ size = 24 }: { size?: number }) {
@@ -84,28 +72,6 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
       </div>
     </div>
   );
-}
-
-function StatCard({
-  icon, label, value, sub, accent = 'text-[#202124]',
-}: { icon: React.ReactNode; label: string; value: React.ReactNode; sub?: string; accent?: string }) {
-  return (
-    <div className={`${CARD} p-4`}>
-      <div className="flex items-center gap-2 text-[#5f6368]">
-        {icon}
-        <span className="text-[11px] font-medium uppercase tracking-wider">{label}</span>
-      </div>
-      <div className={`mt-2 font-mono text-2xl font-medium tabular-nums ${accent}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-[#80868b]">{sub}</div>}
-    </div>
-  );
-}
-
-function levelTone(level: string): string {
-  const i = ['L3', 'L4', 'L5', 'L6', 'L7', 'L8'].indexOf(level);
-  if (i >= 4) return 'text-[#a142f4]';
-  if (i >= 2) return 'text-[#1a73e8]';
-  return 'text-[#5f6368]';
 }
 
 // Vertical "thermometer" comparing the achieved portfolio score against the
@@ -475,6 +441,7 @@ function App() {
       const assignments = allAssignments.filter(a => !seatIds.has(a.project_id));
       const seatAssignments = allAssignments.filter(a => seatIds.has(a.project_id));
       setResults({ assignments, seatAssignments, seatProjects, totalScore, upperBound, scores: allScores, assignmentSources });
+      setReviewedProjects(new Set()); // a fresh optimization invalidates prior close-out reviews
 
       // Diagnostics — open DevTools console to confirm every stage executed.
       const eff = upperBound ? Math.round((totalScore / upperBound) * 1000) / 10 : 0;
