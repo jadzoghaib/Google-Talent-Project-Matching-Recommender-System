@@ -4,6 +4,7 @@ import type { Employee } from './lib/types';
 import {
   SKILLS_CATALOG, EMPLOYEE_DOMAINS as DOMAINS, LEVELS,
   EMPLOYEE_ROLES as ROLES, LOCATIONS,
+  DEGREES, FIELDS, UNIVERSITIES, PREVIOUS_COMPANIES, DIVERSITY_GROUPS,
 } from './lib/catalog';
 
 const DOMAIN_COLORS: Record<string, string> = {
@@ -89,6 +90,8 @@ function RatingRow({ value, onChange, labels }: { value: number; onChange: (v: n
 interface ProfileData {
   name: string; level: string; role_category: string; primary_domain: string;
   years_experience: number; skills: string[]; primary_location: string;
+  degree: string; field: string; university: string;
+  previous_companies: string[]; diversity_group: string;
 }
 type AptitudeData    = Record<string, number>;
 type PersonalityData = Record<number, number>;
@@ -108,6 +111,8 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
   const [profile, setProfile] = useState<ProfileData>({
     name: '', level: 'L4', role_category: 'Mid', primary_domain: 'Undecided',
     years_experience: 2, skills: [], primary_location: 'US-West',
+    degree: 'BS', field: 'Computer Science', university: 'Other Top School',
+    previous_companies: [], diversity_group: 'A',
   });
   const [aptitude,     setAptitude]     = useState<AptitudeData>({});
   const [personality,  setPersonality]  = useState<PersonalityData>({});
@@ -174,8 +179,8 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
       personality_extraversion:      bigFive['personality_extraversion']      ?? 3,
       personality_agreeableness:     bigFive['personality_agreeableness']     ?? 3,
       personality_neuroticism:       bigFive['personality_neuroticism']       ?? 3,
-      education: { degree: 'BSc', field: 'Computer Science', university: 'Other Top School' },
-      previous_companies: [],
+      education: { degree: profile.degree, field: profile.field, university: profile.university },
+      previous_companies: profile.previous_companies,
       past_projects_count: 0,
       avg_past_performance: 3.5,
       primary_location: profile.primary_location,
@@ -183,7 +188,7 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
       can_work_across_timezones: true,
       current_staffed: false,
       available_from: today,
-      diversity_group: 'Not specified',
+      diversity_group: profile.diversity_group,
     };
 
     onSubmit({ employee, domainAffinities: aptitude });
@@ -287,6 +292,57 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
                 </div>
               </div>
             </div>
+
+            {/* Background & education */}
+            <div className="space-y-3 rounded-xl border border-[#e8eaed] bg-[#f8f9fa] p-3.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#5f6368]">Background &amp; education</div>
+              <div className="grid grid-cols-3 gap-3">
+                <label className="block">
+                  <span className={lbl}>Degree</span>
+                  <select value={profile.degree} onChange={e => setProfile({ ...profile, degree: e.target.value })} className={field}>
+                    {DEGREES.map(d => <option key={d}>{d}</option>)}
+                  </select>
+                </label>
+                <label className="col-span-2 block">
+                  <span className={lbl}>Field</span>
+                  <select value={profile.field} onChange={e => setProfile({ ...profile, field: e.target.value })} className={field}>
+                    {FIELDS.map(f => <option key={f}>{f}</option>)}
+                  </select>
+                </label>
+                <label className="col-span-3 block">
+                  <span className={lbl}>University</span>
+                  <select value={profile.university} onChange={e => setProfile({ ...profile, university: e.target.value })} className={field}>
+                    {UNIVERSITIES.map(u => <option key={u}>{u}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div>
+                <span className={lbl}>Previous companies <span className="text-[#9aa0a6]">· optional, tap to select</span></span>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {PREVIOUS_COMPANIES.map(c => {
+                    const on = profile.previous_companies.includes(c);
+                    return (
+                      <button key={c} type="button"
+                        onClick={() => setProfile({
+                          ...profile,
+                          previous_companies: on ? profile.previous_companies.filter(x => x !== c) : [...profile.previous_companies, c],
+                        })}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                          on ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[#dadce0] bg-white text-[#5f6368] hover:border-[#1a73e8] hover:text-[#1a73e8]'
+                        }`}>
+                        {c}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <label className="block sm:w-1/3">
+                <span className={lbl}>Diversity group</span>
+                <select value={profile.diversity_group} onChange={e => setProfile({ ...profile, diversity_group: e.target.value })} className={field}>
+                  {DIVERSITY_GROUPS.map(g => <option key={g} value={g}>Group {g}</option>)}
+                </select>
+              </label>
+            </div>
           </div>
         )}
 
@@ -370,6 +426,10 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
                 <div className="text-[15px] font-semibold text-[#202124]">{profile.name}</div>
                 <div className="mt-0.5 text-[12px] text-[#5f6368]">
                   {profile.level} · {profile.role_category} · {profile.primary_domain} · {profile.years_experience}y exp · {profile.primary_location}
+                </div>
+                <div className="mt-1 text-[11px] text-[#80868b]">
+                  {profile.degree} {profile.field}, {profile.university} · Group {profile.diversity_group}
+                  {profile.previous_companies.length > 0 && <> · ex-{profile.previous_companies.join(', ')}</>}
                 </div>
                 {skillList.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">

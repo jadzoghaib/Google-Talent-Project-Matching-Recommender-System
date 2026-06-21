@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Users, Play, Plus, RefreshCw, Award, Sparkles, CheckCircle2,
-  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, BarChart2, UserPlus,
+  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, BarChart2, UserPlus, ClipboardCheck,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,6 +20,8 @@ import type { NewHireResult } from './OnboardingPage';
 import { SKILLS_CATALOG, PROJECT_DOMAINS, LEVELS, PROJECT_ROLES, DOMAIN_SKILLS } from './lib/catalog';
 import { ProjectsTab } from './ProjectsTab';
 import { PeopleTab } from './PeopleTab';
+import { ReviewDrawer } from './ReviewDrawer';
+import type { ReviewRow } from './ReviewDrawer';
 
 interface PipelineProject extends Project {
   isUserAdded?: boolean;
@@ -300,6 +302,8 @@ function App() {
     assignmentSources: Record<string, AssignmentSource>;
   } | null>(null);
   const [analysis, setAnalysis] = useState<{ empId: string; projId: string } | null>(null);
+  const [reviewProjId, setReviewProjId] = useState<string | null>(null);
+  const [reviewedProjects, setReviewedProjects] = useState<Set<string>>(new Set());
   const [violations, setViolations] = useState<string[]>([]);
   const [modelEval, setModelEval] = useState<ModelEvaluation | null>(null);
   const [mfAffinity, setMfAffinity] = useState<MFAffinity>({});
@@ -563,6 +567,50 @@ function App() {
     setResults(null);
     toast.success(`${employee.name} added to talent pool — run the recommender to assign them.`);
   }
+
+  // ---- peer-review history loop -------------------------------------------
+  // Closing out a staffed project: PM + peers score each member. Scores become
+  // historical-assignment rows (feeding the history signal) and warm up each
+  // member's track record (+1 project, running-average performance) — so a new
+  // hire stops being a pure cold-start case after their first delivered project.
+  const reviewData = useMemo(() => {
+    if (!reviewProjId || !results) return null;
+    const proj = pipeline.find(p => p.project_id === reviewProjId);
+    const team = results.assignments.find(a => a.project_id === reviewProjId);
+    if (!proj || !team) return null;
+    const members = team.employees
+      .map(id => employees.find(e => e.employee_id === id) ?? newEmployees.find(e => e.employee_id === id))
+      .filter((e): e is Employee => Boolean(e));
+    return { proj, members };
+  }, [reviewProjId, results, pipeline, employees, newEmployees]);
+
+  const submitReviews = (proj: Project, rows: ReviewRow[]) => {
+    setHistorical(prev => [
+      ...prev,
+      ...rows.map(r => ({
+        employee_id: r.employee_id,
+        project_id: proj.project_id,
+        pm_review: r.pm_review,
+        peer_collaboration_avg: r.peer_collaboration_avg,
+        delivery_score: r.delivery_score,
+      })),
+    ]);
+
+    const composite = new Map(rows.map(r => [r.employee_id, (r.pm_review + r.peer_collaboration_avg + r.delivery_score) / 3]));
+    const warm = (e: Employee): Employee => {
+      const c = composite.get(e.employee_id);
+      if (c === undefined) return e;
+      const count = e.past_projects_count + 1;
+      const avg = Math.round(((e.avg_past_performance * e.past_projects_count + c) / count) * 100) / 100;
+      return { ...e, past_projects_count: count, avg_past_performance: avg };
+    };
+    setEmployees(prev => prev.map(warm));
+    setNewEmployees(prev => prev.map(warm));
+
+    setReviewedProjects(prev => new Set(prev).add(proj.project_id));
+    setReviewProjId(null);
+    toast.success(`Reviews recorded for "${proj.title}" — team history & performance updated.`);
+  };
 
   // Material text-field classes (reused across the add-project form)
   const field = 'mt-1 w-full rounded-lg border border-[#dadce0] bg-white px-3 py-2.5 text-sm text-[#202124] outline-none transition focus:border-[#1a73e8] focus:ring-1 focus:ring-[#1a73e8]';
@@ -1036,6 +1084,24 @@ function App() {
                         <AlertTriangle className="h-4 w-4" /> No qualified team found under the current constraints and available pool.
                       </div>
                     )}
+
+                    {team.employees.length > 0 && (
+                      <div className="mt-3 flex justify-end">
+                        {reviewedProjects.has(proj.project_id) ? (
+                          <span className="flex items-center gap-1.5 rounded-full bg-[#e6f4ea] px-3 py-1.5 text-[11px] font-medium text-[#137333]">
+                            <CheckCircle2 className="h-3.5 w-3.5" /> Reviewed — history updated
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setReviewProjId(proj.project_id)}
+                            className="flex items-center gap-1.5 rounded-full border border-[#dadce0] px-3.5 py-1.5 text-[11px] font-medium text-[#1a73e8] transition hover:bg-[#e8f0fe]"
+                            title="Record PM + peer reviews to build work history"
+                          >
+                            <ClipboardCheck className="h-3.5 w-3.5" /> Complete &amp; review
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1138,6 +1204,19 @@ function App() {
             assignmentSource={drawerData.source}
             isOnboardingEmployee={drawerData.isOnboardingEmployee}
             onClose={() => setAnalysis(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* ---- Project close-out review drawer ---- */}
+      <AnimatePresence>
+        {reviewData && (
+          <ReviewDrawer
+            key={reviewData.proj.project_id}
+            project={reviewData.proj}
+            members={reviewData.members}
+            onSubmit={rows => submitReviews(reviewData.proj, rows)}
+            onClose={() => setReviewProjId(null)}
           />
         )}
       </AnimatePresence>

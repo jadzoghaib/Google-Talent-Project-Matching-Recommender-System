@@ -52,3 +52,17 @@ export const EMPLOYEE_ROLES = ['Junior', 'Mid', 'Senior', 'Staff', 'Principal', 
 export const PROJECT_ROLES = ['Tech Lead', 'Software Engineer', 'Project Manager'] as const;
 
 export const LOCATIONS = ['US-West', 'US-East', 'EMEA', 'APAC'] as const;
+
+// CV / background vocabularies — mirror sample_education() and the company /
+// diversity pools in generate_dataset.py.
+export const DEGREES = ['BS', 'MS', 'PhD'] as const;
+export const FIELDS = ['Computer Science', 'Computer Engineering', 'Electrical Engineering', 'Math', 'Data Science'] as const;
+export const UNIVERSITIES = [
+  'Stanford', 'MIT', 'UC Berkeley', 'Carnegie Mellon', 'Georgia Tech',
+  'ETH Zurich', 'University of Waterloo', 'UIUC', 'University of Toronto', 'Other Top School',
+] as const;
+export const PREVIOUS_COMPANIES = [
+  'Google', 'Meta', 'Amazon', 'Microsoft', 'Apple', 'Uber', 'Stripe',
+  'OpenAI', 'Startup', 'Ex-Google (returner)',
+] as const;
+export const DIVERSITY_GROUPS = ['A', 'B', 'C', 'D'] as const;
