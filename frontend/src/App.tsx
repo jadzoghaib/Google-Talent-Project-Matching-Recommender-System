@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
   Users, Play, Plus, RefreshCw, Award, Sparkles, CheckCircle2,
-  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, UserCheck, BarChart2, UserPlus,
+  AlertTriangle, X, Layers, Gauge, TrendingUp, ShieldCheck, BarChart2, UserPlus,
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,12 +17,20 @@ import type { ModelEvaluation } from './lib/evaluation';
 import { AnalysisDrawer } from './AnalysisDrawer';
 import { OnboardingPage } from './OnboardingPage';
 import type { NewHireResult } from './OnboardingPage';
+import { SKILLS_CATALOG, PROJECT_DOMAINS, LEVELS, PROJECT_ROLES, DOMAIN_SKILLS } from './lib/catalog';
 
 interface PipelineProject extends Project {
   isUserAdded?: boolean;
 }
 
-const DOMAINS = ['Search', 'Ads', 'YouTube', 'Android', 'Cloud', 'AI Platform', 'Payments', 'Infra', 'Maps', 'Workspace', 'Chrome'];
+// Project-staffing types for the Add-Project form
+type SkillReq = { skill: string; min_proficiency: number };
+type RoleReq = { role: string; min_level: string; count: number };
+
+const DEFAULT_ROLES: RoleReq[] = [
+  { role: 'Tech Lead', min_level: 'L6', count: 1 },
+  { role: 'Software Engineer', min_level: 'L4', count: 4 },
+];
 
 // Google brand palette
 const G = { blue: '#4285F4', red: '#EA4335', yellow: '#FBBC04', green: '#34A853', blue600: '#1a73e8' };
@@ -165,6 +173,116 @@ function PortfolioThermometer({ current, max }: { current: number; max: number }
   );
 }
 
+// Multi-select skills editor — draws from the shared catalog so project skill
+// requirements live in the same namespace as employee skills (exact-match scoring).
+function SkillsEditor({ value, onChange, domain }: {
+  value: SkillReq[]; onChange: (v: SkillReq[]) => void; domain: string;
+}) {
+  const selected = new Set(value.map(s => s.skill));
+  const available = SKILLS_CATALOG.filter(s => !selected.has(s));
+  const suggestions = (DOMAIN_SKILLS[domain] ?? []).filter(s => !selected.has(s));
+
+  const add = (skill: string) => {
+    if (!skill || selected.has(skill)) return;
+    onChange([...value, { skill, min_proficiency: 3 }]);
+  };
+  const remove = (skill: string) => onChange(value.filter(s => s.skill !== skill));
+  const setProf = (skill: string, p: number) =>
+    onChange(value.map(s => (s.skill === skill ? { ...s, min_proficiency: p } : s)));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value=""
+          onChange={e => add(e.target.value)}
+          className="rounded-lg border border-[#dadce0] bg-white px-3 py-2 text-sm text-[#202124] outline-none transition focus:border-[#1a73e8]"
+        >
+          <option value="" disabled>+ Add a skill…</option>
+          {available.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {suggestions.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1 text-[11px] text-[#80868b]">
+            <span>Suggested for {domain}:</span>
+            {suggestions.slice(0, 4).map(s => (
+              <button key={s} type="button" onClick={() => add(s)}
+                className="rounded-full border border-dashed border-[#dadce0] px-2 py-0.5 text-[#1a73e8] transition hover:bg-[#e8f0fe]">
+                + {s}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {value.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          {value.map(({ skill, min_proficiency }) => (
+            <div key={skill} className="flex items-center gap-2 rounded-lg border border-[#e8eaed] bg-[#f8f9fa] px-2.5 py-1.5">
+              <span className="flex-1 truncate text-sm text-[#202124]">{skill}</span>
+              <span className="hidden text-[10px] text-[#80868b] sm:inline">min prof.</span>
+              <div className="flex gap-0.5">
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} type="button" onClick={() => setProf(skill, n)}
+                    title={`Minimum proficiency ${n}`}
+                    className={`h-6 w-6 rounded text-[11px] font-semibold transition ${
+                      n <= min_proficiency ? 'bg-[#1a73e8] text-white' : 'border border-[#dadce0] bg-white text-[#9aa0a6]'
+                    }`}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <button type="button" onClick={() => remove(skill)}
+                className="rounded p-1 text-[#9aa0a6] transition hover:bg-[#fce8e6] hover:text-[#d93025]" aria-label={`Remove ${skill}`}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-[#9aa0a6]">No skills added yet — pick from the dropdown above.</div>
+      )}
+    </div>
+  );
+}
+
+// Required-roles editor — role name + minimum level + headcount. Feeds the
+// Level/Role-Fit signal directly (previously these were hardcoded).
+function RolesEditor({ value, onChange }: { value: RoleReq[]; onChange: (v: RoleReq[]) => void }) {
+  const add = () => onChange([...value, { role: 'Software Engineer', min_level: 'L4', count: 1 }]);
+  const update = (i: number, patch: Partial<RoleReq>) =>
+    onChange(value.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const remove = (i: number) => onChange(value.filter((_, idx) => idx !== i));
+
+  return (
+    <div className="space-y-2">
+      {value.map((r, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#e8eaed] bg-[#f8f9fa] px-2.5 py-1.5">
+          <select value={r.role} onChange={e => update(i, { role: e.target.value })}
+            className="rounded-lg border border-[#dadce0] bg-white px-2 py-1.5 text-sm outline-none focus:border-[#1a73e8]">
+            {PROJECT_ROLES.map(role => <option key={role} value={role}>{role}</option>)}
+          </select>
+          <span className="text-[11px] text-[#80868b]">min level</span>
+          <select value={r.min_level} onChange={e => update(i, { min_level: e.target.value })}
+            className="rounded-lg border border-[#dadce0] bg-white px-2 py-1.5 text-sm outline-none focus:border-[#1a73e8]">
+            {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <span className="text-[11px] text-[#80868b]">count</span>
+          <input type="number" min={1} max={20} value={r.count}
+            onChange={e => update(i, { count: parseInt(e.target.value) || 1 })}
+            className="w-16 rounded-lg border border-[#dadce0] bg-white px-2 py-1.5 text-sm outline-none focus:border-[#1a73e8]" />
+          <button type="button" onClick={() => remove(i)}
+            className="ml-auto rounded p-1 text-[#9aa0a6] transition hover:bg-[#fce8e6] hover:text-[#d93025]" aria-label="Remove role">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={add}
+        className="flex items-center gap-1 rounded-lg border border-dashed border-[#dadce0] px-3 py-1.5 text-xs font-medium text-[#1a73e8] transition hover:bg-[#e8f0fe]">
+        <Plus className="h-3.5 w-3.5" /> Add role
+      </button>
+    </div>
+  );
+}
+
 function App() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [allProjects, setAllProjects] = useState<Project[]>([]);
@@ -191,9 +309,14 @@ function App() {
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [newProject, setNewProject] = useState({
+  const [newProject, setNewProject] = useState<{
+    title: string; domain: string; priority: number;
+    minSize: number; targetSize: number; maxSize: number;
+    skills: SkillReq[]; roles: RoleReq[];
+  }>({
     title: '', domain: 'Search', priority: 3, minSize: 3, targetSize: 5, maxSize: 7,
-    skills: 'Python, Distributed Systems',
+    skills: [{ skill: 'Python', min_proficiency: 3 }, { skill: 'Distributed Systems', min_proficiency: 3 }],
+    roles: DEFAULT_ROLES,
   });
 
   // ---- data load ----------------------------------------------------------
@@ -304,13 +427,14 @@ function App() {
 
   // ---- pipeline editing ---------------------------------------------------
   function validateForm(): string | null {
-    const { title, minSize, targetSize, maxSize, skills } = newProject;
+    const { title, minSize, targetSize, maxSize, skills, roles } = newProject;
     if (!title.trim()) return 'Project title is required.';
     if ([minSize, targetSize, maxSize].some(v => !Number.isFinite(v) || v < 1)) return 'Team sizes must be positive whole numbers.';
     if (minSize > targetSize) return 'Minimum size cannot exceed target size.';
     if (targetSize > maxSize) return 'Target size cannot exceed maximum size.';
     if (maxSize > 20) return 'Maximum team size for this demo is 20.';
-    if (skills.split(',').map(s => s.trim()).filter(Boolean).length === 0) return 'Add at least one required skill.';
+    if (skills.length === 0) return 'Add at least one required skill.';
+    if (roles.length === 0) return 'Add at least one required role.';
     if (pipeline.some(p => p.title.trim().toLowerCase() === title.trim().toLowerCase()))
       return 'A project with this title is already in the pipeline.';
     return null;
@@ -330,11 +454,8 @@ function App() {
       required_team_size_min: newProject.minSize,
       required_team_size_max: newProject.maxSize,
       required_team_size_target: newProject.targetSize,
-      required_roles: [
-        { role: 'Tech Lead', min_level: 'L6', count: 1 },
-        { role: 'Software Engineer', min_level: 'L4', count: Math.max(1, newProject.targetSize - 1) },
-      ],
-      required_skills: newProject.skills.split(',').map(s => s.trim()).filter(Boolean).map(s => ({ skill: s, min_proficiency: 3, weight: 1.0 })),
+      required_roles: newProject.roles,
+      required_skills: newProject.skills.map(s => ({ skill: s.skill, min_proficiency: s.min_proficiency, weight: 1.0 })),
       tech_requirements: [],
       duration_weeks: 16,
       target_start_date: new Date(Date.now() + 1000 * 3600 * 24 * 30).toISOString().split('T')[0],
@@ -345,7 +466,11 @@ function App() {
     setPipeline(prev => [...prev, proj]);
     setShowAddForm(false);
     setResults(null);
-    setNewProject({ title: '', domain: 'Search', priority: 3, minSize: 3, targetSize: 5, maxSize: 7, skills: 'Python, Distributed Systems' });
+    setNewProject({
+      title: '', domain: 'Search', priority: 3, minSize: 3, targetSize: 5, maxSize: 7,
+      skills: [{ skill: 'Python', min_proficiency: 3 }, { skill: 'Distributed Systems', min_proficiency: 3 }],
+      roles: DEFAULT_ROLES,
+    });
     toast.success(`Added "${proj.title}" to the pipeline`);
   };
 
@@ -406,16 +531,6 @@ function App() {
               <Users className="h-3.5 w-3.5 text-[#5f6368]" />
               <span className="font-medium tabular-nums">{employees.length}</span>
               <span className="text-[#5f6368]">staff</span>
-            </div>
-            <div className="hidden items-center gap-1.5 rounded-full bg-[#f1f3f4] px-3 py-1.5 sm:flex">
-              <UserCheck className="h-3.5 w-3.5 text-[#34A853]" />
-              <span className="font-medium tabular-nums">{availableCount}</span>
-              <span className="text-[#5f6368]">available</span>
-              {newEmployees.length > 0 && (
-                <span className="ml-1 rounded-full bg-[#34A853] px-1.5 py-0.5 text-[9px] font-semibold text-white">
-                  +{newEmployees.length} new
-                </span>
-              )}
             </div>
             <button
               onClick={() => setActiveTab(activeTab === 'onboard' ? 'recommender' : 'onboard')}
@@ -568,7 +683,7 @@ function App() {
                       onChange={e => setNewProject({ ...newProject, domain: e.target.value })}
                       className={field}
                     >
-                      {DOMAINS.map(d => <option key={d} value={d}>{d}</option>)}
+                      {PROJECT_DOMAINS.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </label>
                   <label className="block">
@@ -603,15 +718,25 @@ function App() {
                       className={field}
                     />
                   </label>
-                  <label className="col-span-2 block lg:col-span-4">
-                    <span className={fieldLabel}>Required skills (comma-separated)</span>
-                    <input
-                      value={newProject.skills}
-                      onChange={e => setNewProject({ ...newProject, skills: e.target.value })}
-                      className={field}
-                      placeholder="Machine Learning, Distributed Systems, Python"
-                    />
-                  </label>
+                  <div className="col-span-2 lg:col-span-4">
+                    <span className={fieldLabel}>Required skills</span>
+                    <div className="mt-1.5">
+                      <SkillsEditor
+                        value={newProject.skills}
+                        onChange={skills => setNewProject({ ...newProject, skills })}
+                        domain={newProject.domain}
+                      />
+                    </div>
+                  </div>
+                  <div className="col-span-2 lg:col-span-4">
+                    <span className={fieldLabel}>Required roles</span>
+                    <div className="mt-1.5">
+                      <RolesEditor
+                        value={newProject.roles}
+                        onChange={roles => setNewProject({ ...newProject, roles })}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {formError && (

@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, User, Zap, Brain, CheckCircle2 } from 'lucide-react';
 import type { Employee } from './lib/types';
-
-const LEVELS    = ['L3', 'L4', 'L5', 'L6', 'L7', 'L8'];
-const ROLES     = ['Junior', 'Mid', 'Senior', 'Staff', 'Principal', 'Project Manager'];
-const DOMAINS   = ['Search','Ads','YouTube','Android','Cloud','AI Platform','Payments','Infra','Maps','Workspace','Chrome','Undecided'];
-const LOCATIONS = ['US-West', 'US-East', 'EMEA', 'APAC'];
+import {
+  SKILLS_CATALOG, EMPLOYEE_DOMAINS as DOMAINS, LEVELS,
+  EMPLOYEE_ROLES as ROLES, LOCATIONS,
+} from './lib/catalog';
 
 const DOMAIN_COLORS: Record<string, string> = {
   Search:'#4285F4', Ads:'#FBBC04', YouTube:'#EA4335', Android:'#34A853',
@@ -89,7 +88,7 @@ function RatingRow({ value, onChange, labels }: { value: number; onChange: (v: n
 
 interface ProfileData {
   name: string; level: string; role_category: string; primary_domain: string;
-  years_experience: number; skills: string; primary_location: string;
+  years_experience: number; skills: string[]; primary_location: string;
 }
 type AptitudeData    = Record<string, number>;
 type PersonalityData = Record<number, number>;
@@ -108,7 +107,7 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
   const [step, setStep]       = useState(0);
   const [profile, setProfile] = useState<ProfileData>({
     name: '', level: 'L4', role_category: 'Mid', primary_domain: 'Undecided',
-    years_experience: 2, skills: '', primary_location: 'US-West',
+    years_experience: 2, skills: [], primary_location: 'US-West',
   });
   const [aptitude,     setAptitude]     = useState<AptitudeData>({});
   const [personality,  setPersonality]  = useState<PersonalityData>({});
@@ -117,7 +116,7 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
   function validateStep(): string | null {
     if (step === 0) {
       if (!profile.name.trim()) return 'Full name is required.';
-      if (!profile.skills.trim()) return 'Enter at least one skill.';
+      if (profile.skills.length === 0) return 'Select at least one skill.';
     }
     if (step === 1) {
       const missing = DOMAIN_SCENARIOS.filter(s => !aptitude[s.domain]);
@@ -168,7 +167,7 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
       role_category: profile.role_category,
       years_experience: profile.years_experience,
       primary_domain: profile.primary_domain === 'Undecided' ? null : profile.primary_domain,
-      skills: profile.skills.split(',').map(s => s.trim()).filter(Boolean).map(s => ({ skill: s, proficiency: 3 })),
+      skills: profile.skills.map(s => ({ skill: s, proficiency: 3 })),
       tech_tags: [],
       personality_openness:          bigFive['personality_openness']          ?? 3,
       personality_conscientiousness: bigFive['personality_conscientiousness'] ?? 3,
@@ -262,11 +261,31 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
                   {LOCATIONS.map(l => <option key={l}>{l}</option>)}
                 </select>
               </label>
-              <label className="col-span-2 block">
-                <span className={lbl}>Skills (comma-separated)</span>
-                <input value={profile.skills} onChange={e => setProfile({ ...profile, skills: e.target.value })}
-                  className={field} placeholder="Python, Distributed Systems, Machine Learning" />
-              </label>
+              <div className="col-span-2">
+                <span className={lbl}>Skills <span className="text-[#9aa0a6]">· tap to select from the catalog</span></span>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {SKILLS_CATALOG.map(s => {
+                    const on = profile.skills.includes(s);
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setProfile({
+                          ...profile,
+                          skills: on ? profile.skills.filter(x => x !== s) : [...profile.skills, s],
+                        })}
+                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                          on
+                            ? 'border-[#1a73e8] bg-[#1a73e8] text-white'
+                            : 'border-[#dadce0] bg-white text-[#5f6368] hover:border-[#1a73e8] hover:text-[#1a73e8]'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -339,7 +358,7 @@ export function OnboardingPage({ onSubmit, onCancel }: Props) {
         {/* Step 3 — Review */}
         {step === 3 && (() => {
           const bigFive  = computeBigFive();
-          const skillList = profile.skills.split(',').map(s => s.trim()).filter(Boolean);
+          const skillList = profile.skills;
           return (
             <div className="space-y-5">
               <h3 className="flex items-center gap-2 text-base font-medium text-[#202124]">
