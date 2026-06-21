@@ -75,3 +75,17 @@ export interface TeamAssignment {
 }
 
 export type UserSegment = 'exploration' | 'exploitation' | 'balanced';
+
+// A request to add extra people to an already-active project (gap-fill hiring).
+// At recommender time each open seat becomes a single-/few-slot pseudo-project
+// so the same portfolio optimizer staffs it from the free talent pool.
+export interface OpenSeat {
+  id: string;
+  projectId: string;     // the active project this seat belongs to
+  projectTitle: string;
+  domain: string;
+  role: string;
+  minLevel: string;
+  skills: string[];      // emphasis skills (proficiency defaulted at staffing time)
+  seats: number;         // how many extra people are needed
+}

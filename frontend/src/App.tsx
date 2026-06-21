@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { Employee, Project, MatchScore, TeamAssignment, Assignment } from './lib/types';
+import type { Employee, Project, MatchScore, TeamAssignment, Assignment, OpenSeat } from './lib/types';
 import { loadEmployees, loadProjects, loadHistorical, loadMFAffinity, loadMFMetrics } from './lib/dataLoader';
 import type { MFMetrics } from './lib/dataLoader';
 import { computeMatchScore } from './lib/scorer';
@@ -291,7 +291,9 @@ function App() {
   const [historical, setHistorical] = useState<Assignment[]>([]);
   const [pipeline, setPipeline] = useState<PipelineProject[]>([]);
   const [results, setResults] = useState<{
-    assignments: TeamAssignment[];
+    assignments: TeamAssignment[];       // pipeline teams
+    seatAssignments: TeamAssignment[];   // gap-fill staffing for active projects
+    seatProjects: Project[];             // pseudo-projects backing the open seats
     totalScore: number;
     upperBound: number;
     scores: MatchScore[];
@@ -307,6 +309,7 @@ function App() {
   const [poolCap, setPoolCap] = useState(70); // how many free engineers the optimizer may draw from
   const [newEmployees, setNewEmployees] = useState<Employee[]>([]);
   const [onboardingAffinities, setOnboardingAffinities] = useState<Record<string, Record<string, number>>>({});
+  const [openSeats, setOpenSeats] = useState<OpenSeat[]>([]);
   const [activeTab, setActiveTab] = useState<'recommender' | 'projects' | 'people' | 'onboard'>('recommender');
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -364,7 +367,7 @@ function App() {
   const drawerData = useMemo(() => {
     if (!analysis || !results) return null;
     const emp = employees.find(e => e.employee_id === analysis.empId) ?? newEmployees.find(e => e.employee_id === analysis.empId);
-    const proj = pipeline.find(p => p.project_id === analysis.projId);
+    const proj = pipeline.find(p => p.project_id === analysis.projId) ?? results.seatProjects.find(p => p.project_id === analysis.projId);
     const score = results.scores.find(s => s.employee_id === analysis.empId && s.project_id === analysis.projId);
     if (!emp || !proj || !score) return null;
     return {
@@ -392,9 +395,45 @@ function App() {
     toast.success(`Added "${p.title}" to the pipeline`);
   };
 
+  // ---- open seats (gap-fill hiring on active projects) --------------------
+  const seatProjectIds = useMemo(() => new Set(openSeats.map(s => s.projectId)), [openSeats]);
+
+  const requestSeat = (seat: Omit<OpenSeat, 'id'>) => {
+    setOpenSeats(prev => [...prev, { ...seat, id: `${seat.projectId}-${Date.now()}` }]);
+    setResults(null);
+    setActiveTab('recommender');
+    toast.success(`Gap-fill request added for "${seat.projectTitle}" — run the recommender to staff it.`);
+  };
+
+  const removeSeat = (id: string) => {
+    setOpenSeats(prev => prev.filter(s => s.id !== id));
+    setResults(null);
+  };
+
+  // Each open seat becomes a single-/few-slot pseudo-project the optimizer staffs.
+  const seatToProject = (seat: OpenSeat): Project => ({
+    project_id: `SEAT-${seat.id}`,
+    title: `${seat.projectTitle} · +${seat.seats} ${seat.role}`,
+    description: `Gap-fill seat for the active project "${seat.projectTitle}".`,
+    domain: seat.domain,
+    priority: 1,
+    required_team_size_min: seat.seats,
+    required_team_size_target: seat.seats,
+    required_team_size_max: seat.seats,
+    required_roles: [{ role: seat.role, min_level: seat.minLevel, count: seat.seats }],
+    required_skills: seat.skills.map(s => ({ skill: s, min_proficiency: 3, weight: 1.0 })),
+    tech_requirements: [],
+    duration_weeks: 0,
+    target_start_date: new Date().toISOString().split('T')[0],
+    status: 'open_seat',
+  });
+
   // ---- recommender --------------------------------------------------------
   const runRecommender = async () => {
-    if (pipeline.length === 0) { toast.error('Add at least one project to the pipeline'); return; }
+    if (pipeline.length === 0 && openSeats.length === 0) {
+      toast.error('Add at least one project to the pipeline, or request a gap-fill seat');
+      return;
+    }
     setIsRunning(true);
     await new Promise(r => setTimeout(r, 40)); // let the spinner paint
 
@@ -407,33 +446,42 @@ function App() {
       // New hires always enter the pool; their domain affinities replace MF training data.
       const availablePool = [...regularPool, ...newEmployees];
 
+      // Open seats join the same optimize run as single-/few-slot pseudo-projects,
+      // so pipeline staffing and gap-fills compete for the same free people.
+      const seatProjects = openSeats.map(seatToProject);
+      const seatIds = new Set(seatProjects.map(p => p.project_id));
+      const projectsToStaff: Project[] = [...pipeline, ...seatProjects];
+
       const projectDomainMap: Record<string, string> = {};
-      [...allProjects, ...pipeline].forEach(p => { if (p.project_id) projectDomainMap[p.project_id] = p.domain; });
+      [...allProjects, ...projectsToStaff].forEach(p => { if (p.project_id) projectDomainMap[p.project_id] = p.domain; });
 
       // Merge onboarding assessment affinities into the MF lookup.
       const mergedMfAffinity: MFAffinity = { ...mfAffinity, ...onboardingAffinities };
 
       const allScores: MatchScore[] = [];
-      pipeline.forEach(proj => {
+      projectsToStaff.forEach(proj => {
         availablePool.forEach(emp => {
           allScores.push(computeMatchScore(emp, proj, historical, projectDomainMap, mergedMfAffinity));
         });
       });
 
-      const { assignments, totalScore, upperBound, debug, assignmentSources } = optimizeAssignments(pipeline, availablePool, allScores, historical);
-      setResults({ assignments, totalScore, upperBound, scores: allScores, assignmentSources });
+      const { assignments: allAssignments, totalScore, upperBound, debug, assignmentSources } =
+        optimizeAssignments(projectsToStaff, availablePool, allScores, historical);
+
+      const assignments = allAssignments.filter(a => !seatIds.has(a.project_id));
+      const seatAssignments = allAssignments.filter(a => seatIds.has(a.project_id));
+      setResults({ assignments, seatAssignments, seatProjects, totalScore, upperBound, scores: allScores, assignmentSources });
 
       // Diagnostics — open DevTools console to confirm every stage executed.
       const eff = upperBound ? Math.round((totalScore / upperBound) * 1000) / 10 : 0;
       console.log(
-        `[TeamMatch] ${pipeline.length} projects · pool ${debug.available} · scored ${debug.candidatesScored} pairs ` +
+        `[TeamMatch] ${pipeline.length} projects + ${seatProjects.length} open seats · pool ${debug.available} · scored ${debug.candidatesScored} pairs ` +
         `(range ${debug.scoreMin}–${debug.scoreMax}, avg ${debug.scoreAvg}) | ` +
         `greedy ${debug.greedyAssigned} assigns · ${debug.localPasses} local passes · ${debug.localSwaps} cohesion swaps | ` +
-        `top-hire contention: ${debug.contendedTopPicks}/${pipeline.length} projects | ` +
         `achieved ${totalScore} / ceiling ${upperBound} = ${eff}% | ${debug.elapsedMs}ms`,
       );
 
-      const v = validateAssignments(assignments, employees, pipeline, allScores);
+      const v = validateAssignments(allAssignments, employees, projectsToStaff, allScores);
       setViolations(v);
       if (v.length > 0) toast.warning(`${v.length} constraint note${v.length > 1 ? 's' : ''} — see the validation panel`);
       else toast.success(`Portfolio optimized · score ${totalScore}`);
@@ -604,6 +652,8 @@ function App() {
             projects={allProjects}
             pipelineIds={pipelineIds}
             onAddToPipeline={addExistingToPipeline}
+            onRequestSeat={requestSeat}
+            seatProjectIds={seatProjectIds}
           />
         )}
 
@@ -638,7 +688,7 @@ function App() {
             </button>
             <button
               onClick={runRecommender}
-              disabled={isRunning || pipeline.length === 0}
+              disabled={isRunning || (pipeline.length === 0 && openSeats.length === 0)}
               className="flex items-center gap-2 rounded-full bg-[#1a73e8] px-6 py-2.5 text-sm font-medium text-white shadow-[0_1px_2px_rgba(60,64,67,0.3)] transition hover:bg-[#1b66c9] disabled:cursor-not-allowed disabled:bg-[#e8eaed] disabled:text-[#9aa0a6] disabled:shadow-none"
             >
               {isRunning ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
@@ -839,6 +889,33 @@ function App() {
           </div>
         </section>
 
+        {/* ---- Pending open seats (gap-fill requests) ---- */}
+        {openSeats.length > 0 && (
+          <section>
+            <div className="mb-3 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#137333]">
+              <UserPlus className="h-3.5 w-3.5" /> Open seats · {openSeats.length} active-project gap-fill{openSeats.length !== 1 ? 's' : ''}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {openSeats.map(seat => (
+                <div key={seat.id} className="group flex items-center gap-2.5 rounded-xl border border-[#ceead6] bg-[#f6fbf7] py-2 pl-3.5 pr-2.5 text-sm shadow-[0_1px_2px_rgba(60,64,67,0.08)]">
+                  <span className="font-medium text-[#202124]">{seat.projectTitle}</span>
+                  <span className="rounded-full bg-[#e6f4ea] px-2 py-0.5 text-[10px] font-medium text-[#137333]">
+                    +{seat.seats} {seat.role} · {seat.minLevel}
+                  </span>
+                  <span className="rounded-full bg-[#f1f3f4] px-2 py-0.5 text-[10px] text-[#5f6368]">{seat.domain}</span>
+                  <button
+                    onClick={() => removeSeat(seat.id)}
+                    className="rounded-md p-0.5 text-[#9aa0a6] opacity-60 transition hover:bg-[#fce8e6] hover:text-[#d93025] group-hover:opacity-100"
+                    aria-label={`Remove seat for ${seat.projectTitle}`}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ---- Results ---- */}
         {results && coverage && (
           <section className="space-y-5 animate-fade-in-up">
@@ -964,6 +1041,71 @@ function App() {
               })}
             </div>
 
+            {/* ---- Gap fills: extra hires staffed onto active projects ---- */}
+            {results.seatAssignments.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#137333]">
+                  <UserPlus className="h-3.5 w-3.5" /> Gap fills · extra hires for active projects
+                </div>
+                {results.seatProjects.map(sp => {
+                  const team = results.seatAssignments.find(a => a.project_id === sp.project_id);
+                  if (!team) return null;
+                  const filled = team.employees.length;
+                  return (
+                    <div key={sp.project_id} className="rounded-2xl border border-[#ceead6] bg-[#f6fbf7] p-4">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <span className="text-sm font-medium text-[#202124]">{sp.title}</span>
+                          <span className="ml-2 rounded-full bg-[#f1f3f4] px-2 py-0.5 text-[10px] text-[#5f6368]">{sp.domain}</span>
+                        </div>
+                        <span className={`text-xs font-medium ${filled >= sp.required_team_size_target ? 'text-[#1e8e3e]' : 'text-[#e37400]'}`}>
+                          {filled}/{sp.required_team_size_target} filled
+                        </span>
+                      </div>
+                      {filled > 0 ? (
+                        <div className="space-y-1.5">
+                          {team.employees.map(empId => {
+                            const emp = getEmployee(empId);
+                            if (!emp) return null;
+                            const indScore = team.individualScores[empId] || 0;
+                            return (
+                              <div key={empId} className="flex items-center justify-between gap-3 rounded-xl border border-[#e8eaed] bg-white px-3.5 py-2.5">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white" style={{ background: avatarColor(emp.name) }}>
+                                    {emp.name.split(' ').map(p => p[0]).slice(0, 2).join('')}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-medium text-[#202124]">{emp.name}</div>
+                                    <div className="text-[11px] text-[#80868b]">
+                                      <span className={levelTone(emp.level)}>{emp.level}</span> · {emp.role_category} · {emp.primary_domain || 'No domain'}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 text-right font-mono text-base font-medium tabular-nums text-[#1e8e3e]">{indScore}</div>
+                                  <button
+                                    onClick={() => setAnalysis({ empId, projId: sp.project_id })}
+                                    className="flex items-center gap-1 rounded-lg border border-[#dadce0] px-2 py-1 text-[10px] font-medium text-[#1a73e8] transition hover:bg-[#e8f0fe]"
+                                    title="Open detailed analysis"
+                                  >
+                                    <BarChart2 className="h-3 w-3" /> Analyze
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 rounded-xl border border-[#feefc3] bg-[#fef7e0] px-3.5 py-3 text-xs text-[#b06000]">
+                          <AlertTriangle className="h-4 w-4" /> No qualified candidate found for this seat in the free pool.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <p className="pt-2 text-center text-[11px] text-[#9aa0a6]">
               Scores: hybrid model (content-based + collaborative + personality + level) with segment-specific weighting.
               Optimizer maximizes portfolio value with a cohesion-weighted objective and hard role/size/availability constraints.
@@ -991,7 +1133,7 @@ function App() {
             proj={drawerData.proj}
             score={drawerData.score}
             allScores={results!.scores}
-            pipeline={pipeline}
+            pipeline={[...pipeline, ...results!.seatProjects]}
             mfMetrics={mfMetrics}
             assignmentSource={drawerData.source}
             isOnboardingEmployee={drawerData.isOnboardingEmployee}

@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import {
-  Search, Layers, CircleDot, CheckCircle2, Users, Plus, Check, X, Calendar, Clock,
+  Search, Layers, CircleDot, CheckCircle2, Users, Plus, Check, X, Calendar, Clock, UserPlus,
 } from 'lucide-react';
-import type { Project } from './lib/types';
-import { PROJECT_DOMAINS } from './lib/catalog';
+import type { Project, OpenSeat } from './lib/types';
+import { PROJECT_DOMAINS, PROJECT_ROLES, LEVELS, SKILLS_CATALOG } from './lib/catalog';
 import { computeProjectAnalytics } from './lib/analytics';
 import { AnimatePresence } from 'framer-motion';
 import {
@@ -26,9 +26,11 @@ interface Props {
   projects: Project[];
   pipelineIds: Set<string>;
   onAddToPipeline: (p: Project) => void;
+  onRequestSeat: (seat: Omit<OpenSeat, 'id'>) => void;
+  seatProjectIds: Set<string>; // active projects that already have a pending open seat
 }
 
-export function ProjectsTab({ projects, pipelineIds, onAddToPipeline }: Props) {
+export function ProjectsTab({ projects, pipelineIds, onAddToPipeline, onRequestSeat, seatProjectIds }: Props) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | 'pipeline' | 'active' | 'completed'>('all');
   const [domain, setDomain] = useState<'all' | string>('all');
@@ -144,7 +146,9 @@ export function ProjectsTab({ projects, pipelineIds, onAddToPipeline }: Props) {
             key={selected.project_id}
             project={selected}
             staged={pipelineIds.has(selected.project_id)}
+            hasPendingSeat={seatProjectIds.has(selected.project_id)}
             onAddToPipeline={() => { onAddToPipeline(selected); }}
+            onRequestSeat={seat => { onRequestSeat(seat); setSelected(null); }}
             onClose={() => setSelected(null)}
           />
         )}
@@ -155,9 +159,13 @@ export function ProjectsTab({ projects, pipelineIds, onAddToPipeline }: Props) {
 
 // ── Project detail drawer ───────────────────────────────────────────────────
 function ProjectDetailDrawer({
-  project, staged, onAddToPipeline, onClose,
-}: { project: Project; staged: boolean; onAddToPipeline: () => void; onClose: () => void }) {
+  project, staged, hasPendingSeat, onAddToPipeline, onRequestSeat, onClose,
+}: {
+  project: Project; staged: boolean; hasPendingSeat: boolean;
+  onAddToPipeline: () => void; onRequestSeat: (seat: Omit<OpenSeat, 'id'>) => void; onClose: () => void;
+}) {
   const sm = statusMeta(project.status);
+  const [showSeatForm, setShowSeatForm] = useState(false);
   return (
     <DrawerShell onClose={onClose} ariaLabel={`Details for ${project.title}`}>
       {/* Header */}
@@ -232,9 +240,38 @@ function ProjectDetailDrawer({
             <Calendar className="h-3.5 w-3.5" /> {project.target_start_date}
           </div>
         </div>
+
+        {/* Active projects: request a gap-fill hire */}
+        {project.status === 'active' && (
+          <div className="rounded-xl border border-[#ceead6] bg-[#f6fbf7] p-4">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-[#137333]">
+              <UserPlus className="h-3.5 w-3.5" /> Extra hiring
+            </div>
+            {hasPendingSeat ? (
+              <div className="text-[12px] text-[#137333]">
+                A gap-fill request is already pending for this team — run the recommender to staff it.
+              </div>
+            ) : showSeatForm ? (
+              <SeatRequestForm project={project} onSubmit={onRequestSeat} onCancel={() => setShowSeatForm(false)} />
+            ) : (
+              <>
+                <p className="mb-2.5 text-[12px] text-[#5f6368]">
+                  This team is live. Need one more person? Request a gap-fill seat and the recommender will
+                  staff it from the free talent pool.
+                </p>
+                <button
+                  onClick={() => setShowSeatForm(true)}
+                  className="flex items-center gap-1.5 rounded-full bg-[#34A853] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2d9147]"
+                >
+                  <UserPlus className="h-4 w-4" /> Request an extra hire
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Footer action */}
+      {/* Footer action — staging pipeline projects only */}
       {project.status === 'pipeline' && (
         <div className="sticky bottom-0 border-t border-[#e8eaed] bg-white px-5 py-3">
           <button
@@ -248,5 +285,69 @@ function ProjectDetailDrawer({
         </div>
       )}
     </DrawerShell>
+  );
+}
+
+// ── Gap-fill request form (active projects) ─────────────────────────────────
+function SeatRequestForm({
+  project, onSubmit, onCancel,
+}: { project: Project; onSubmit: (seat: Omit<OpenSeat, 'id'>) => void; onCancel: () => void }) {
+  const [role, setRole] = useState(project.required_roles[0]?.role ?? 'Software Engineer');
+  const [minLevel, setMinLevel] = useState(project.required_roles[0]?.min_level ?? 'L4');
+  const [seats, setSeats] = useState(1);
+  const [skills, setSkills] = useState<string[]>(project.required_skills.map(s => s.skill).slice(0, 6));
+
+  const submit = () => onSubmit({
+    projectId: project.project_id,
+    projectTitle: project.title,
+    domain: project.domain,
+    role, minLevel, seats: Math.max(1, seats), skills,
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="text-[10px] text-[#5f6368]">Role</span>
+          <select value={role} onChange={e => setRole(e.target.value)} className="mt-1 w-full rounded-lg border border-[#dadce0] bg-white px-2 py-1.5 text-sm outline-none focus:border-[#1a73e8]">
+            {PROJECT_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-[10px] text-[#5f6368]">Min level</span>
+          <select value={minLevel} onChange={e => setMinLevel(e.target.value)} className="mt-1 w-full rounded-lg border border-[#dadce0] bg-white px-2 py-1.5 text-sm outline-none focus:border-[#1a73e8]">
+            {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </label>
+      </div>
+      <label className="block">
+        <span className="text-[10px] text-[#5f6368]">Seats needed</span>
+        <input type="number" min={1} max={5} value={seats} onChange={e => setSeats(parseInt(e.target.value) || 1)}
+          className="mt-1 block w-24 rounded-lg border border-[#dadce0] bg-white px-2 py-1.5 text-sm outline-none focus:border-[#1a73e8]" />
+      </label>
+      <div>
+        <span className="text-[10px] text-[#5f6368]">Skill emphasis</span>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {SKILLS_CATALOG.map(s => {
+            const on = skills.includes(s);
+            return (
+              <button key={s} type="button"
+                onClick={() => setSkills(on ? skills.filter(x => x !== s) : [...skills, s])}
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition ${
+                  on ? 'border-[#1a73e8] bg-[#1a73e8] text-white' : 'border-[#dadce0] bg-white text-[#5f6368] hover:border-[#1a73e8]'
+                }`}>
+                {s}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={submit} className="flex items-center gap-1.5 rounded-full bg-[#34A853] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2d9147]">
+          <Check className="h-4 w-4" /> Submit request
+        </button>
+        <button onClick={onCancel} className="rounded-full px-3 py-2 text-sm font-medium text-[#5f6368] transition hover:bg-[#f1f3f4]">Cancel</button>
+      </div>
+    </div>
   );
 }
