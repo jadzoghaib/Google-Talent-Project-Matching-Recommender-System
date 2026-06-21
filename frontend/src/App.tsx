@@ -422,6 +422,18 @@ function App() {
       const seatIds = new Set(seatProjects.map(p => p.project_id));
       const projectsToStaff: Project[] = [...pipeline, ...seatProjects];
 
+      // Anchor each seat to its active project's existing roster, so the gap-fill
+      // hire is chosen partly for chemistry with the team already on that project.
+      const empById = new Map(employees.map(e => [e.employee_id, e]));
+      const seatAnchors: Record<string, Employee[]> = {};
+      openSeats.forEach(seat => {
+        const parent = allProjects.find(p => p.project_id === seat.projectId);
+        const roster = (parent?.current_staffed_ids ?? [])
+          .map(id => empById.get(id))
+          .filter((e): e is Employee => Boolean(e));
+        if (roster.length) seatAnchors[`SEAT-${seat.id}`] = roster;
+      });
+
       const projectDomainMap: Record<string, string> = {};
       [...allProjects, ...projectsToStaff].forEach(p => { if (p.project_id) projectDomainMap[p.project_id] = p.domain; });
 
@@ -436,7 +448,7 @@ function App() {
       });
 
       const { assignments: allAssignments, totalScore, upperBound, debug, assignmentSources } =
-        optimizeAssignments(projectsToStaff, availablePool, allScores, historical);
+        optimizeAssignments(projectsToStaff, availablePool, allScores, historical, seatAnchors);
 
       const assignments = allAssignments.filter(a => !seatIds.has(a.project_id));
       const seatAssignments = allAssignments.filter(a => seatIds.has(a.project_id));
@@ -1092,9 +1104,16 @@ function App() {
                           <span className="text-sm font-medium text-[#202124]">{sp.title}</span>
                           <span className="ml-2 rounded-full bg-[#f1f3f4] px-2 py-0.5 text-[10px] text-[#5f6368]">{sp.domain}</span>
                         </div>
-                        <span className={`text-xs font-medium ${filled >= sp.required_team_size_target ? 'text-[#1e8e3e]' : 'text-[#e37400]'}`}>
-                          {filled}/{sp.required_team_size_target} filled
-                        </span>
+                        <div className="flex items-center gap-3 text-xs">
+                          {filled > 0 && (
+                            <span className="text-[#80868b]">
+                              chemistry w/ team <span className="font-mono font-medium text-[#a142f4]">{team.cohesion.toFixed(2)}</span>
+                            </span>
+                          )}
+                          <span className={`font-medium ${filled >= sp.required_team_size_target ? 'text-[#1e8e3e]' : 'text-[#e37400]'}`}>
+                            {filled}/{sp.required_team_size_target} filled
+                          </span>
+                        </div>
                       </div>
                       {filled > 0 ? (
                         <div className="space-y-1.5">

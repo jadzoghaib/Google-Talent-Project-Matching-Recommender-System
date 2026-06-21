@@ -71,7 +71,12 @@ export function optimizeAssignments(
   pipelineProjects: Project[],
   allEmployees: Employee[],
   scores: MatchScore[],
-  _history: unknown[] = []
+  _history: unknown[] = [],
+  // Pre-existing team members per project (e.g. an active project's current roster
+  // backing a gap-fill seat). They count toward team cohesion so a new hire is
+  // chosen partly for chemistry with the people already there, but they occupy no
+  // role slots and are never (re)assigned.
+  fixedMembers: Record<string, Employee[]> = {},
 ): { assignments: TeamAssignment[]; totalScore: number; upperBound: number; debug: OptimizerDebug; assignmentSources: Record<string, AssignmentSource> } {
   const t0 = performance.now();
   const today = new Date();
@@ -81,6 +86,12 @@ export function optimizeAssignments(
   scores.forEach(s => scoreMap.set(`${s.employee_id}|${s.project_id}`, s.score));
   const scoreFor = (empId: string, projId: string) => scoreMap.get(`${empId}|${projId}`) ?? 3;
   const prw = (proj: Project) => priorityWeight(proj.priority); // contention tilt
+
+  // Cohesion of the assigned team plus any fixed/anchor members on that project.
+  const cohesionWith = (projId: string, team: Employee[]): number => {
+    const anchors = fixedMembers[projId];
+    return anchors && anchors.length ? cohesionOf([...anchors, ...team]) : cohesionOf(team);
+  };
 
   // ---- Per-project mutable state -------------------------------------------
   const teams = new Map<string, Employee[]>();             // projId -> team
@@ -179,7 +190,7 @@ export function optimizeAssignments(
   function teamObjective(team: Employee[], projId: string): number {
     let s = 0;
     for (const e of team) s += scoreFor(e.employee_id, projId);
-    return s + COHESION_WEIGHT * cohesionOf(team) * team.length;
+    return s + COHESION_WEIGHT * cohesionWith(projId, team) * team.length;
   }
 
   // Per-project shortlist of the strongest available candidates (by score).
@@ -255,7 +266,7 @@ export function optimizeAssignments(
       individualScores[emp.employee_id] = sc;
       sum += sc;
     }
-    const cohesion = cohesionOf(team);
+    const cohesion = cohesionWith(proj.project_id, team);
     const teamScore = team.length ? sum / team.length : 0;
 
     assignments.push({
