@@ -669,6 +669,7 @@ function App() {
             onAddToPipeline={addExistingToPipeline}
             onRequestSeat={requestSeat}
             seatProjectIds={seatProjectIds}
+            nameOf={id => getEmployee(id)?.name ?? id}
           />
         )}
 

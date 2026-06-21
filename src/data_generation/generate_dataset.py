@@ -344,9 +344,20 @@ def generate_projects(n=N_PROJECTS):
             min_lead_level = random.choice(["L5", "L6", "L7"])
             required_roles.append({"role": "Tech Lead", "min_level": min_lead_level, "count": 1})
 
-        n_eng = max(3, size_target - len(required_roles))
+        # ~25% of efforts need a dedicated Project Manager (a slot only PMs can fill).
+        if random.random() < 0.25:
+            required_roles.append({"role": "Project Manager", "min_level": random.choice(["L5", "L6"]), "count": 1})
+
+        used_slots = sum(r["count"] for r in required_roles)
+        n_eng = max(3, size_target - used_slots)
         min_eng_level = random.choice(["L3", "L4", "L5"])
         required_roles.append({"role": "Software Engineer", "min_level": min_eng_level, "count": n_eng})
+
+        # Widen the band if the required role slots exceed the max team size, so
+        # every required role stays satisfiable (no size-vs-roles contradiction).
+        total_slots = used_slots + n_eng
+        if total_slots > size_max:
+            size_max = total_slots
 
         # Required skills - drawn mostly from the domain's core skills so the
         # project's needs line up with what domain engineers actually have.
@@ -413,12 +424,17 @@ def generate_historical_assignments(employees_df, projects_df, n_assignments=N_H
     emp_records = employees_df.to_dict("records")
     emp_by_id = {e["employee_id"]: e for e in emp_records}
 
-    # Index employees by primary domain to bias realistic staffing
-    emp_ids_by_domain = {}
-    for e in emp_records:
-        emp_ids_by_domain.setdefault(e["primary_domain"], []).append(e["employee_id"])
-    all_emp_ids = [e["employee_id"] for e in emp_records]
+    # Index employees by primary domain to bias realistic staffing. Employees with
+    # NO past projects (past_projects_count == 0) are genuinely new hires — they get
+    # NO history here, so they remain a real cold-start cohort (no MF row) that the
+    # onboarding assessment and peer-review loop exist to bring online.
     past_count = {e["employee_id"]: int(e.get("past_projects_count", 0) or 0) for e in emp_records}
+    assignable = [e for e in emp_records if past_count[e["employee_id"]] > 0]
+    emp_ids_by_domain = {}
+    for e in assignable:
+        emp_ids_by_domain.setdefault(e["primary_domain"], []).append(e["employee_id"])
+    all_emp_ids = [e["employee_id"] for e in assignable]
+    print(f"  cold-start cohort: {len(emp_records) - len(assignable)} employees with no past projects (excluded from history)")
 
     # --- Hidden low-rank aptitude structure (the signal MF is meant to recover) ---
     # Domains cluster into "families" that share a talent profile: systems work spans
@@ -526,6 +542,53 @@ def generate_historical_assignments(employees_df, projects_df, n_assignments=N_H
     return pd.DataFrame(assignments)
 
 # =============================================================================
+# ACTIVE-PROJECT ROSTERS
+# =============================================================================
+def populate_active_rosters(employees, projects):
+    """Give each ACTIVE project a real current team drawn from the currently-staffed
+    pool, domain-matched where possible and exclusive across projects. This makes
+    current_staffed_ids coherent with current_staffed (a person on an active roster
+    IS busy, so the optimizer's free pool never pulls them) and gives the Projects
+    tab a real roster to show for gap-fill decisions."""
+    staffed = employees[employees["current_staffed"] == True]
+    by_domain = {}
+    for _, e in staffed.iterrows():
+        by_domain.setdefault(e["primary_domain"], []).append(e["employee_id"])
+    for k in by_domain:
+        random.shuffle(by_domain[k])
+    all_staffed = list(staffed["employee_id"])
+    random.shuffle(all_staffed)
+    used = set()
+
+    def take(domain, n):
+        out = []
+        for src in (by_domain.get(domain, []), all_staffed):
+            for eid in src:
+                if len(out) >= n:
+                    break
+                if eid in used:
+                    continue
+                used.add(eid)
+                out.append(eid)
+            if len(out) >= n:
+                break
+        return out
+
+    new_ids, new_counts = [], []
+    for _, p in projects.iterrows():
+        if p["status"] == "active":
+            roster = take(p["domain"], int(p["current_staffing_count"]) or 0)
+            new_ids.append(json.dumps(roster))
+            new_counts.append(len(roster))
+        else:
+            new_ids.append(p["current_staffed_ids"])
+            new_counts.append(p["current_staffing_count"])
+    projects = projects.copy()
+    projects["current_staffed_ids"] = new_ids
+    projects["current_staffing_count"] = new_counts
+    return projects
+
+# =============================================================================
 # MAIN
 # =============================================================================
 def main():
@@ -538,6 +601,7 @@ def main():
     employees = generate_employees()
     projects = generate_projects()
     assignments = generate_historical_assignments(employees, projects)
+    projects = populate_active_rosters(employees, projects)
 
     employees_path = DATA_DIR / "employees.csv"
     projects_path = DATA_DIR / "projects.csv"

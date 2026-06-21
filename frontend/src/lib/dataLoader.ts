@@ -65,6 +65,8 @@ export async function loadProjects(): Promise<Project[]> {
     duration_weeks: parseInt(r.duration_weeks) || 12,
     target_start_date: r.target_start_date,
     status: r.status,
+    current_staffing_count: parseInt(r.current_staffing_count) || 0,
+    current_staffed_ids: parseJSONField(r.current_staffed_ids),
   }));
 }
 

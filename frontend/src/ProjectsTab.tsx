@@ -28,9 +28,10 @@ interface Props {
   onAddToPipeline: (p: Project) => void;
   onRequestSeat: (seat: Omit<OpenSeat, 'id'>) => void;
   seatProjectIds: Set<string>; // active projects that already have a pending open seat
+  nameOf: (id: string) => string;
 }
 
-export function ProjectsTab({ projects, pipelineIds, onAddToPipeline, onRequestSeat, seatProjectIds }: Props) {
+export function ProjectsTab({ projects, pipelineIds, onAddToPipeline, onRequestSeat, seatProjectIds, nameOf }: Props) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<'all' | 'pipeline' | 'active' | 'completed'>('all');
   const [domain, setDomain] = useState<'all' | string>('all');
@@ -147,6 +148,7 @@ export function ProjectsTab({ projects, pipelineIds, onAddToPipeline, onRequestS
             project={selected}
             staged={pipelineIds.has(selected.project_id)}
             hasPendingSeat={seatProjectIds.has(selected.project_id)}
+            nameOf={nameOf}
             onAddToPipeline={() => { onAddToPipeline(selected); }}
             onRequestSeat={seat => { onRequestSeat(seat); setSelected(null); }}
             onClose={() => setSelected(null)}
@@ -159,9 +161,9 @@ export function ProjectsTab({ projects, pipelineIds, onAddToPipeline, onRequestS
 
 // ── Project detail drawer ───────────────────────────────────────────────────
 function ProjectDetailDrawer({
-  project, staged, hasPendingSeat, onAddToPipeline, onRequestSeat, onClose,
+  project, staged, hasPendingSeat, nameOf, onAddToPipeline, onRequestSeat, onClose,
 }: {
-  project: Project; staged: boolean; hasPendingSeat: boolean;
+  project: Project; staged: boolean; hasPendingSeat: boolean; nameOf: (id: string) => string;
   onAddToPipeline: () => void; onRequestSeat: (seat: Omit<OpenSeat, 'id'>) => void; onClose: () => void;
 }) {
   const sm = statusMeta(project.status);
@@ -240,6 +242,22 @@ function ProjectDetailDrawer({
             <Calendar className="h-3.5 w-3.5" /> {project.target_start_date}
           </div>
         </div>
+
+        {/* Active projects: current roster */}
+        {project.status === 'active' && project.current_staffed_ids && project.current_staffed_ids.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#5f6368]">
+              <Users className="h-3.5 w-3.5" /> Current team · {project.current_staffed_ids.length}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {project.current_staffed_ids.map(id => (
+                <span key={id} className="rounded-full border border-[#dadce0] bg-white px-2.5 py-1 text-[11px] text-[#202124]">
+                  {nameOf(id)}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Active projects: request a gap-fill hire */}
         {project.status === 'active' && (

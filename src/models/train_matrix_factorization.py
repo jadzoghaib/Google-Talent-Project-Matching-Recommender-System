@@ -152,16 +152,25 @@ def main():
     lift = 100 * (rmse_domain - rmse_mf) / rmse_domain
     print(f"  -> MF improves on the domain-mean baseline by {lift:.1f}%")
 
-    # ---- Export predicted affinity for EVERY employee × domain --------------
-    pred_matrix = np.empty((n_users, n_items))
-    for u in range(n_users):
-        for i in range(n_items):
-            pred_matrix[u, i] = np.clip(predict(u, i), 1, 5)
+    # ---- Export predicted affinity, ONLY for employees with observed history ----
+    # MF still generalises across domains WITHIN a row (the lecture point: aptitude
+    # transfers between related domains), so every exported employee gets all 11
+    # domain predictions. But employees with NO history get NO row — they are a
+    # genuine cold-start cohort whose CF signal correctly falls back to the
+    # historical average (or the onboarding assessment once they take it).
+    observed_emps = set(cells["employee_id"])
+    export_ids = [e for e in emp_ids if e in observed_emps]
+    pred_rows = []
+    for e in export_ids:
+        u = emp_idx[e]
+        pred_rows.append([np.clip(predict(u, i), 1, 5) for i in range(n_items)])
 
-    out = pd.DataFrame(np.round(pred_matrix, 3), columns=domains)
-    out.insert(0, "employee_id", emp_ids)
+    out = pd.DataFrame(np.round(np.array(pred_rows), 3), columns=domains)
+    out.insert(0, "employee_id", export_ids)
     out_path = DATA_DIR / "mf_employee_domain.csv"
     out.to_csv(out_path, index=False)
+    print(f"  exported MF rows for {len(export_ids)}/{n_users} employees "
+          f"({n_users - len(export_ids)} cold-start employees have no row)")
 
     metrics = {
         "model": "matrix_factorization_biased_sgd",

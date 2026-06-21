@@ -39,6 +39,8 @@ export interface Project {
   duration_weeks: number;
   target_start_date: string;
   status: string;
+  current_staffing_count?: number;   // size of the active project's current team
+  current_staffed_ids?: string[];    // employee_ids currently on an active project
 }
 
 export interface Assignment {
