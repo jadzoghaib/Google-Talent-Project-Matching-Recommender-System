@@ -1,5 +1,7 @@
 # TeamMatch — Talent → Project Recommender
 
+**🔗 Live demo: [google-talent-project-matching-reco.vercel.app](https://google-talent-project-matching-reco.vercel.app/)**
+
 A hybrid recommender that matches software engineers to internal projects and staffs an
 entire pipeline at once with a portfolio-global, cohesion-aware optimizer. Built around a
 synthetic Google-scale org: **800 engineers, 300 projects** (75 pipeline · 60 active · 165
@@ -72,6 +74,8 @@ contention.
 | `docs/`, `TEAMMATCH_FULL_SPEC.md`, `HOW_IT_WORKS.md` | Design docs |
 
 ## Quick start
+> No setup needed to try it — the [live demo](https://google-talent-project-matching-reco.vercel.app/) runs entirely in the browser. The steps below are for local development.
+
 ```bash
 # 1. (optional) regenerate the synthetic data + retrain the MF model
 py src/data_generation/generate_dataset.py
