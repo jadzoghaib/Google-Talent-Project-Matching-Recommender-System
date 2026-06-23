@@ -737,13 +737,14 @@ function App() {
                 r = {modelEval.correlation.toFixed(2)}
               </div>
               <div className="mt-0.5 text-xs text-[#5f6368]">
-                predicted score vs. stored ground truth · n={modelEval.n.toLocaleString()}
+                in-sample fit — recovers the signal it was built on · n={modelEval.n.toLocaleString()} training pairs
               </div>
               {mfMetrics && (
                 <div className="mt-2 border-t border-[#d2e3fc] pt-2 text-[11px] text-[#5f6368]">
-                  CF = Matrix Factorization · test RMSE{' '}
+                  Generalization (held-out): MF test RMSE{' '}
                   <span className="font-medium text-[#1967d2]">{mfMetrics.rmse_mf}</span>
-                  <span className="text-[#1e8e3e]"> · beats baseline {mfMetrics.mf_lift_over_domain_mean_pct}%</span>
+                  {' '}vs. domain-mean {mfMetrics.rmse_domain_mean}
+                  <span className="text-[#1e8e3e]"> · +{mfMetrics.mf_lift_over_domain_mean_pct}%</span>
                 </div>
               )}
             </div>
@@ -751,7 +752,7 @@ function App() {
               icon={<TrendingUp className="h-4 w-4" />}
               label="Top-decile precision"
               value={`${Math.round(modelEval.topDecilePrecision * 100)}%`}
-              sub="top-10% picks that were genuinely top-tier"
+              sub="in-sample: top-10% picks that were genuinely top-tier"
               accent="text-[#1e8e3e]"
             />
             <StatCard

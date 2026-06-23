@@ -539,6 +539,17 @@ def generate_historical_assignments(employees_df, projects_df, n_assignments=N_H
         if assigned_count % 500 == 0:
             print(f"  ... {assigned_count} assignments generated")
 
+    # Export the hidden aptitude signal (the low-rank structure MF is meant to recover)
+    # so offline impact analyses can grade counterfactual staffings against the TRUE
+    # latent affinity rather than re-inventing one. Writing here consumes no RNG, so
+    # the generated CSVs are byte-for-byte unchanged.
+    pd.DataFrame([
+        {"employee_id": eid, **{f"apt_{i}": float(v) for i, v in enumerate(vec)}}
+        for eid, vec in emp_aptitude.items()
+    ]).to_csv(DATA_DIR / "emp_aptitude.csv", index=False)
+    (DATA_DIR / "domain_profile.json").write_text(json.dumps(
+        {d: list(map(float, vec)) for d, vec in domain_profile.items()}, indent=2))
+
     return pd.DataFrame(assignments)
 
 # =============================================================================
